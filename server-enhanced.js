@@ -62,49 +62,7 @@ const visitStore = new Map(); // 🆕 Store para profile visits
 const followUpStore = new Map(); // 🆕 Store para seguimientos programados
 const dailyLimitStore = new Map(); // 🆕 Store para límites diarios
 
-// Búsqueda específica existente
-const specificSearch = {
-    searchId: 'search_1751839620083_f7eljymfy',
-    containerId: 'container_1751839620083_abc123',
-    status: 'completed',
-    progress: 100,
-    createdAt: '2024-01-05T17:00:00.000Z',
-    completedAt: '2024-01-05T17:12:00.000Z',
-    searchParams: {
-        job_title: 'CEO',
-        industry_codes: ['4', '6'],
-        location: 'San Francisco',
-        company_size: '10-50'
-    },
-    options: {
-        numberOfResultsPerSearch: 50,
-        numberOfPagesPerSearch: 5,
-        removeDuplicateProfiles: true,
-        includeEmails: true
-    },
-    searchUrls: [
-        'https://www.linkedin.com/search/results/people/?keywords=CEO',
-        'https://www.linkedin.com/search/results/people/?industry=4,6'
-    ],
-    results: [
-        {
-            linkedin_url: 'https://linkedin.com/in/john-doe-ceo',
-            first_name: 'John',
-            last_name: 'Doe',
-            headline: 'CEO at TechStartup Inc',
-            company_name: 'TechStartup Inc',
-            location: 'San Francisco, CA',
-            industry: 'Technology',
-            profile_url: 'https://linkedin.com/in/john-doe-ceo',
-            email: 'john.doe@techstartup.com',
-            phone: '+1 (415) 555-0101',
-            extracted_at: '2024-01-05T17:12:00.000Z'
-        }
-        // ... más resultados
-    ]
-};
-
-searchStore.set('search_1751839620083_f7eljymfy', specificSearch);
+// Almacenamiento limpio - sin datos simulados
 
 // ============================================================================
 // 🆕 SERVICIO LINKEDIN PROFILE VISITOR
@@ -445,7 +403,7 @@ class LinkedInProfileVisitorService {
 }
 
 // ============================================================================
-// SERVICIO PHANTOMBUSTER ORIGINAL (BÚSQUEDAS)
+// SERVICIO PHANTOMBUSTER REAL (BÚSQUEDAS)
 // ============================================================================
 
 class PhantombusterService {
@@ -457,21 +415,128 @@ class PhantombusterService {
 
     async launchAgent(searchUrls, options = {}) {
         try {
+            if (!this.apiKey || !this.agentId) {
+                throw new Error('API Key y Agent ID de Phantombuster son requeridos');
+            }
+
             const containerId = `container_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-            console.log('🚀 Lanzando agente Phantombuster...');
+            console.log('🚀 Lanzando agente Phantombuster real...');
             console.log('📋 URLs de búsqueda:', searchUrls);
             console.log('⚙️ Opciones:', options);
 
+            // Llamada real a la API de Phantombuster
+            const response = await fetch(`${this.baseUrl}/agents/fetch-output?id=${this.agentId}`, {
+                method: 'POST',
+                headers: {
+                    'X-Phantombuster-Key': this.apiKey,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    urls: searchUrls,
+                    options: options
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Error de Phantombuster API: ${response.status} ${response.statusText}`);
+            }
+
+            const result = await response.json();
+
             return {
-                containerId,
+                containerId: result.containerId || containerId,
                 status: 'launched',
-                message: 'Agente lanzado exitosamente'
+                message: 'Agente lanzado exitosamente en Phantombuster',
+                phantombusterResult: result
             };
         } catch (error) {
-            console.error('❌ Error lanzando agente:', error);
+            console.error('❌ Error lanzando agente real:', error);
             throw error;
         }
+    }
+
+    async getAgentStatus(containerId) {
+        try {
+            if (!this.apiKey) {
+                throw new Error('API Key de Phantombuster es requerido');
+            }
+
+            const response = await fetch(`${this.baseUrl}/agents/fetch-output?id=${this.agentId}&containerId=${containerId}`, {
+                headers: {
+                    'X-Phantombuster-Key': this.apiKey
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Error obteniendo estado: ${response.status}`);
+            }
+
+            const result = await response.json();
+            return result;
+        } catch (error) {
+            console.error('❌ Error obteniendo estado del agente:', error);
+            throw error;
+        }
+    }
+
+    async getAgentResults(containerId) {
+        try {
+            if (!this.apiKey) {
+                throw new Error('API Key de Phantombuster es requerido');
+            }
+
+            const response = await fetch(`${this.baseUrl}/agents/fetch-output?id=${this.agentId}&containerId=${containerId}`, {
+                headers: {
+                    'X-Phantombuster-Key': this.apiKey
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Error obteniendo resultados: ${response.status}`);
+            }
+
+            const result = await response.json();
+
+            // Procesar y enriquecer los resultados con connectionDegree
+            if (result.output && Array.isArray(result.output)) {
+                return this.enrichResultsWithConnectionDegree(result.output);
+            }
+
+            return result;
+        } catch (error) {
+            console.error('❌ Error obteniendo resultados del agente:', error);
+            throw error;
+        }
+    }
+
+    // Enriquecer resultados con connectionDegree basado en datos reales
+    enrichResultsWithConnectionDegree(results) {
+        return results.map(lead => {
+            // Determinar connectionDegree basado en datos reales del perfil
+            let connectionDegree = '3rd'; // Por defecto
+
+            // Si el perfil tiene información de conexiones mutuas
+            if (lead.mutualConnections && lead.mutualConnections > 0) {
+                connectionDegree = '2nd';
+            }
+
+            // Si el perfil está en la red directa (esto se puede determinar por otros campos)
+            if (lead.isDirectConnection || lead.connectionLevel === 1) {
+                connectionDegree = '1st';
+            }
+
+            // Si hay información de grado de conexión en el perfil
+            if (lead.connectionDegree) {
+                connectionDegree = lead.connectionDegree;
+            }
+
+            return {
+                ...lead,
+                connectionDegree,
+                extracted_at: new Date().toISOString()
+            };
+        });
     }
 
     processSearchParameters(searchParams) {
@@ -485,6 +550,10 @@ class PhantombusterService {
             searchUrls.push(`https://www.linkedin.com/search/results/people/?industry=${searchParams.industry_codes.join(',')}`);
         }
 
+        if (searchParams.location) {
+            searchUrls.push(`https://www.linkedin.com/search/results/people/?location=${encodeURIComponent(searchParams.location)}`);
+        }
+
         if (searchUrls.length === 0) {
             searchUrls.push('https://www.linkedin.com/search/results/people/');
         }
@@ -492,32 +561,62 @@ class PhantombusterService {
         return searchUrls;
     }
 
-    generateSimulatedResults(searchParams, options) {
-        // ... (mantener código original de simulación)
-        const numberOfResults = options.numberOfResultsPerSearch || 100;
-        const results = [];
-
-        // Código de simulación simplificado
-        for (let i = 0; i < numberOfResults; i++) {
-            const firstName = ['Juan', 'María', 'Carlos', 'Ana'][Math.floor(Math.random() * 4)];
-            const lastName = ['García', 'Rodríguez', 'López', 'Martínez'][Math.floor(Math.random() * 4)];
-
-            results.push({
-                linkedin_url: `https://linkedin.com/in/${firstName.toLowerCase()}-${lastName.toLowerCase()}-${i}`,
-                first_name: firstName,
-                last_name: lastName,
-                headline: `Professional at Company ${i}`,
-                company_name: `Company ${i}`,
-                location: 'Madrid, Spain',
-                industry: 'Technology',
-                profile_url: `https://linkedin.com/in/${firstName.toLowerCase()}-${lastName.toLowerCase()}-${i}`,
-                email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@company${i}.com`,
-                phone: `+34 ${Math.floor(Math.random() * 900) + 100} ${Math.floor(Math.random() * 900) + 100} ${Math.floor(Math.random() * 900) + 100}`,
-                extracted_at: new Date().toISOString()
-            });
+    // Función para procesar resultados de Phantombuster y agregar connectionDegree
+    processPhantombusterResults(rawResults, searchParams) {
+        if (!Array.isArray(rawResults)) {
+            console.warn('⚠️ Resultados de Phantombuster no son un array:', rawResults);
+            return [];
         }
 
-        return results;
+        return rawResults.map(lead => {
+            // Determinar connectionDegree basado en datos reales
+            let connectionDegree = this.determineConnectionDegree(lead, searchParams);
+
+            return {
+                linkedin_url: lead.profileUrl || lead.linkedin_url || lead.url,
+                first_name: lead.firstName || lead.first_name,
+                last_name: lead.lastName || lead.last_name,
+                headline: lead.headline || lead.title,
+                company_name: lead.companyName || lead.company_name,
+                location: lead.location,
+                industry: lead.industry,
+                profile_url: lead.profileUrl || lead.linkedin_url || lead.url,
+                email: lead.email,
+                phone: lead.phone,
+                extracted_at: new Date().toISOString(),
+                connectionDegree,
+                // Campos adicionales de Phantombuster
+                mutual_connections: lead.mutualConnections,
+                connection_level: lead.connectionLevel,
+                profile_views: lead.profileViews,
+                last_activity: lead.lastActivity
+            };
+        });
+    }
+
+    // Determinar el grado de conexión basado en datos reales
+    determineConnectionDegree(lead, searchParams) {
+        // Lógica para determinar connectionDegree basada en datos reales
+
+        // Si hay conexiones mutuas, es 2nd degree
+        if (lead.mutualConnections && lead.mutualConnections > 0) {
+            return '2nd';
+        }
+
+        // Si el nivel de conexión está disponible
+        if (lead.connectionLevel) {
+            if (lead.connectionLevel === 1) return '1st';
+            if (lead.connectionLevel === 2) return '2nd';
+            if (lead.connectionLevel === 3) return '3rd';
+        }
+
+        // Si hay información de red directa
+        if (lead.isDirectConnection) {
+            return '1st';
+        }
+
+        // Por defecto, asumir 3rd degree
+        return '3rd';
     }
 }
 
@@ -929,19 +1028,27 @@ app.get('/api/config', authenticateApiKey, (req, res) => {
     res.json({
         success: true,
         data: {
-            phantombuster_api_key: process.env.PHANTOMBUSTER_API_KEY ? 'configurado' : 'no configurado',
-            phantombuster_agent_id: process.env.PHANTOMBUSTER_AGENT_ID || 'no configurado',
+            phantombuster_api_key: process.env.PHANTOMBUSTER_API_KEY ? '✅ configurado' : '❌ no configurado',
+            phantombuster_agent_id: process.env.PHANTOMBUSTER_AGENT_ID ? '✅ configurado' : '❌ no configurado',
             environment: process.env.NODE_ENV || 'development',
             database: 'memory',
+            mode: 'REAL_PHANTOMBUSTER_API',
             total_searches: searchStore.size,
-            total_visits: visitStore.size, // 🆕
-            daily_limit: profileVisitorService.maxDailyVisits // 🆕
+            total_visits: visitStore.size,
+            daily_limit: profileVisitorService.maxDailyVisits,
+            connection_degree_enabled: true,
+            features: [
+                'real_phantombuster_integration',
+                'connection_degree_mapping',
+                'linkedin_profile_visitor',
+                'lead_classification'
+            ]
         }
     });
 });
 
-// Ruta de búsqueda original (simplificada para espacio)
-app.post('/api/search/start', authenticateApiKey, (req, res) => {
+// Ruta de búsqueda real con Phantombuster
+app.post('/api/search/start', authenticateApiKey, async (req, res) => {
     try {
         const { searchParams, options = {} } = req.body;
 
@@ -953,52 +1060,81 @@ app.post('/api/search/start', authenticateApiKey, (req, res) => {
             });
         }
 
+        // Verificar que las credenciales de Phantombuster estén configuradas
+        if (!process.env.PHANTOMBUSTER_API_KEY || !process.env.PHANTOMBUSTER_AGENT_ID) {
+            return res.status(500).json({
+                success: false,
+                message: 'Credenciales de Phantombuster no configuradas',
+                error: 'PHANTOMBUSTER_CREDENTIALS_MISSING'
+            });
+        }
+
         const searchId = `search_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const searchUrls = phantombusterService.processSearchParameters(searchParams);
-        const simulatedResults = phantombusterService.generateSimulatedResults(searchParams, options);
 
+        // Crear búsqueda inicial
         const searchData = {
             searchId,
-            containerId: `container_${Date.now()}`,
-            status: 'completed',
-            progress: 100,
+            containerId: null,
+            status: 'launching',
+            progress: 0,
             createdAt: new Date().toISOString(),
-            completedAt: new Date().toISOString(),
+            completedAt: null,
             searchParams,
             options,
             searchUrls,
-            results: simulatedResults
+            results: []
         };
 
         searchStore.set(searchId, searchData);
 
-        res.json({
-            success: true,
-            message: 'Extracción completada exitosamente',
-            data: {
-                searchId,
-                containerId: searchData.containerId,
-                searchesCount: searchUrls.length,
-                searchUrls,
-                status: 'completed',
-                progress: 100,
-                totalResults: simulatedResults.length,
-                searchParams,
-                options
-            }
-        });
+        // Lanzar agente real de Phantombuster
+        try {
+            const launchResult = await phantombusterService.launchAgent(searchUrls, options);
+
+            // Actualizar búsqueda con containerId real
+            searchData.containerId = launchResult.containerId;
+            searchData.status = 'running';
+            searchData.progress = 10;
+            searchStore.set(searchId, searchData);
+
+            res.json({
+                success: true,
+                message: 'Búsqueda iniciada en Phantombuster',
+                data: {
+                    searchId,
+                    containerId: launchResult.containerId,
+                    searchesCount: searchUrls.length,
+                    searchUrls,
+                    status: 'running',
+                    progress: 10,
+                    searchParams,
+                    options,
+                    message: 'La búsqueda está ejecutándose en Phantombuster. Usa /api/search/status/:searchId para monitorear el progreso.'
+                }
+            });
+
+        } catch (launchError) {
+            // Si falla el lanzamiento, actualizar estado
+            searchData.status = 'failed';
+            searchData.error = launchError.message;
+            searchStore.set(searchId, searchData);
+
+            throw launchError;
+        }
+
     } catch (error) {
-        console.error('❌ Error iniciando extracción:', error);
+        console.error('❌ Error iniciando búsqueda real:', error);
         res.status(500).json({
             success: false,
-            message: 'Error iniciando extracción',
+            message: 'Error iniciando búsqueda en Phantombuster',
             error: error.message
         });
     }
 });
 
-// Mantener otras rutas de búsqueda existentes...
-app.get('/api/search/status/:searchId', authenticateApiKey, (req, res) => {
+// Obtener estado real de búsqueda en Phantombuster
+app.get('/api/search/status/:searchId', authenticateApiKey, async (req, res) => {
     try {
         const { searchId } = req.params;
         const search = searchStore.get(searchId);
@@ -1011,6 +1147,36 @@ app.get('/api/search/status/:searchId', authenticateApiKey, (req, res) => {
             });
         }
 
+        // Si la búsqueda está ejecutándose, consultar estado real de Phantombuster
+        if (search.status === 'running' && search.containerId) {
+            try {
+                const phantombusterStatus = await phantombusterService.getAgentStatus(search.containerId);
+
+                // Actualizar estado basado en respuesta de Phantombuster
+                if (phantombusterStatus.status === 'finished') {
+                    search.status = 'completed';
+                    search.progress = 100;
+                    search.completedAt = new Date().toISOString();
+
+                    // Obtener resultados reales
+                    const realResults = await phantombusterService.getAgentResults(search.containerId);
+                    search.results = phantombusterService.processPhantombusterResults(realResults, search.searchParams);
+
+                } else if (phantombusterStatus.status === 'error') {
+                    search.status = 'failed';
+                    search.error = phantombusterStatus.error || 'Error en Phantombuster';
+                } else {
+                    // Actualizar progreso basado en estado de Phantombuster
+                    search.progress = phantombusterStatus.progress || search.progress;
+                }
+
+                searchStore.set(searchId, search);
+            } catch (statusError) {
+                console.error('❌ Error consultando estado de Phantombuster:', statusError);
+                // No fallar la respuesta, solo loggear el error
+            }
+        }
+
         res.json({
             success: true,
             data: {
@@ -1020,20 +1186,21 @@ app.get('/api/search/status/:searchId', authenticateApiKey, (req, res) => {
                 progress: search.progress,
                 createdAt: search.createdAt,
                 completedAt: search.completedAt,
-                lastCheck: new Date().toISOString()
+                lastCheck: new Date().toISOString(),
+                totalResults: search.results ? search.results.length : 0
             }
         });
     } catch (error) {
         console.error('❌ Error obteniendo estado:', error);
         res.status(500).json({
             success: false,
-            message: 'Error obteniendo estado de extracción',
+            message: 'Error obteniendo estado de búsqueda',
             error: error.message
         });
     }
 });
 
-app.get('/api/search/results/:searchId', authenticateApiKey, (req, res) => {
+app.get('/api/search/results/:searchId', authenticateApiKey, async (req, res) => {
     try {
         const { searchId } = req.params;
         const { limit, offset } = req.query;
@@ -1047,6 +1214,27 @@ app.get('/api/search/results/:searchId', authenticateApiKey, (req, res) => {
             });
         }
 
+        // Si la búsqueda está ejecutándose, intentar obtener resultados actualizados
+        if (search.status === 'running' && search.containerId) {
+            try {
+                const phantombusterStatus = await phantombusterService.getAgentStatus(search.containerId);
+
+                if (phantombusterStatus.status === 'finished') {
+                    search.status = 'completed';
+                    search.progress = 100;
+                    search.completedAt = new Date().toISOString();
+
+                    // Obtener resultados reales de Phantombuster
+                    const realResults = await phantombusterService.getAgentResults(search.containerId);
+                    search.results = phantombusterService.processPhantombusterResults(realResults, search.searchParams);
+
+                    searchStore.set(searchId, search);
+                }
+            } catch (statusError) {
+                console.error('❌ Error consultando resultados de Phantombuster:', statusError);
+            }
+        }
+
         if (search.status !== 'completed') {
             return res.status(400).json({
                 success: false,
@@ -1054,12 +1242,13 @@ app.get('/api/search/results/:searchId', authenticateApiKey, (req, res) => {
                 error: 'SEARCH_NOT_COMPLETED',
                 data: {
                     status: search.status,
-                    progress: search.progress
+                    progress: search.progress,
+                    message: 'La búsqueda está ejecutándose en Phantombuster. Consulta el estado con /api/search/status/:searchId'
                 }
             });
         }
 
-        let results = search.results;
+        let results = search.results || [];
 
         if (limit) {
             const limitNum = parseInt(limit);
@@ -1074,16 +1263,17 @@ app.get('/api/search/results/:searchId', authenticateApiKey, (req, res) => {
                 containerId: search.containerId,
                 status: search.status,
                 leads: results,
-                total: search.results.length,
+                total: search.results ? search.results.length : 0,
                 returned: results.length,
-                extracted_at: search.completedAt
+                extracted_at: search.completedAt,
+                connectionDegree_available: results.length > 0 ? results[0].hasOwnProperty('connectionDegree') : false
             }
         });
     } catch (error) {
         console.error('❌ Error obteniendo resultados:', error);
         res.status(500).json({
             success: false,
-            message: 'Error obteniendo resultados de extracción',
+            message: 'Error obteniendo resultados de búsqueda',
             error: error.message
         });
     }
@@ -1170,21 +1360,27 @@ app.use((error, req, res, next) => {
 // ============================================================================
 
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor enhanced iniciado en puerto ${PORT}`);
+    console.log(`🚀 Servidor Phantombuster REAL iniciado en puerto ${PORT}`);
     console.log(`📊 Modo: ${process.env.NODE_ENV || 'development'}`);
     console.log(`🗄️ Almacenamiento: MEMORIA`);
     console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-    console.log(`🔍 Búsqueda específica disponible: search_1751839620083_f7eljymfy`);
+    console.log(`🔍 Integración REAL con Phantombuster API`);
     console.log(`📈 Total de búsquedas en memoria: ${searchStore.size}`);
-    console.log(`🎯 Nueva funcionalidad: LinkedIn Profile Visitor activada`);
+    console.log(`🎯 LinkedIn Profile Visitor activada`);
     console.log(`📋 Límite diario de visitas: ${profileVisitorService.maxDailyVisits}`);
+    console.log(`🔑 Phantombuster API Key: ${process.env.PHANTOMBUSTER_API_KEY ? '✅ Configurada' : '❌ No configurada'}`);
+    console.log(`🤖 Phantombuster Agent ID: ${process.env.PHANTOMBUSTER_AGENT_ID ? '✅ Configurado' : '❌ No configurado'}`);
     console.log(``);
     console.log(`📚 ENDPOINTS DISPONIBLES:`);
-    console.log(`   🔍 Búsquedas: POST /api/search/start`);
+    console.log(`   🔍 Búsquedas REALES: POST /api/search/start`);
+    console.log(`   📊 Estado de búsqueda: GET /api/search/status/:searchId`);
+    console.log(`   📋 Resultados reales: GET /api/search/results/:searchId`);
     console.log(`   🎯 Visita individual: POST /api/profile-visitor/visit-single`);
     console.log(`   📋 Visita lista: POST /api/profile-visitor/visit-list`);
     console.log(`   📊 Estadísticas: GET /api/stats/overview`);
     console.log(`   🚨 Límites diarios: GET /api/profile-visitor/limits`);
+    console.log(``);
+    console.log(`⚠️  IMPORTANTE: Configura PHANTOMBUSTER_API_KEY y PHANTOMBUSTER_AGENT_ID en el archivo .env`);
 });
 
 module.exports = app;

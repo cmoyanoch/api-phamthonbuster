@@ -1,30 +1,33 @@
-# 🚀 API Phantombuster Local - Servidor Mejorado
+# 🚀 API Phantombuster Real - Servidor de Producción
 
 ## 📋 Descripción
 
-API local simulada de Phantombuster que proporciona funcionalidades completas de extracción de leads de LinkedIn con **búsqueda automática**. El servidor genera datos realistas basados en los parámetros de búsqueda y se completa inmediatamente sin necesidad de monitoreo.
+API de producción que integra directamente con la API real de Phantombuster para extracción de leads de LinkedIn. El servidor ejecuta búsquedas reales en Phantombuster y procesa los resultados incluyendo el campo `connectionDegree` para clasificación automática de leads.
 
 ## ✨ Características Principales
 
-### 🔄 Búsqueda Automática
+### 🔄 Integración Real con Phantombuster
 
-- **Completación inmediata**: Las búsquedas se completan automáticamente al iniciarlas
-- **Sin monitoreo**: No necesitas consultar el estado repetidamente
-- **Resultados instantáneos**: Los datos están disponibles inmediatamente después de iniciar la búsqueda
+- **API Real**: Integración directa con la API oficial de Phantombuster
+- **Búsquedas en tiempo real**: Ejecuta búsquedas reales en LinkedIn a través de Phantombuster
+- **Monitoreo de estado**: Consulta el progreso real de las búsquedas en Phantombuster
+- **Resultados reales**: Procesa y enriquece los datos reales extraídos de LinkedIn
 
-### 🌍 Datos Localizados
+### 🎯 Clasificación Automática de Leads
 
-- **Nombres por país**: Genera nombres y apellidos según la ubicación (Francia, España, internacional)
-- **Empresas locales**: Empresas específicas por país
-- **Formatos telefónicos**: Prefijos telefónicos correctos por país
-- **Ubicaciones realistas**: Basadas en los parámetros de búsqueda
+- **connectionDegree**: Campo automático basado en datos reales de LinkedIn
+- **Mapeo inteligente**: Determina el grado de conexión (`1st`, `2nd`, `3rd`) basado en:
+  - Conexiones mutuas
+  - Nivel de conexión en LinkedIn
+  - Información de red directa
+- **Clasificación por tipo**: Mapea automáticamente a tipos de lead (`hot`, `warm`, `cold`)
 
-### 🎯 Filtros Inteligentes
+### 🌍 Procesamiento de Datos Reales
 
-- **Búsqueda por título**: `job_title`
-- **Búsqueda por industria**: `industry_codes` con mapeo automático
-- **Búsqueda por ubicación**: `location` con detección de país
-- **Opciones avanzadas**: Número de resultados, paginación, eliminación de duplicados
+- **Datos reales de LinkedIn**: Nombres, empresas, ubicaciones reales
+- **Información de conexiones**: Datos reales de la red de LinkedIn
+- **Enriquecimiento automático**: Agrega campos adicionales como `connectionDegree`
+- **Validación de datos**: Procesa y valida los datos recibidos de Phantombuster
 
 ## 🛠️ Tecnologías Utilizadas
 
@@ -65,20 +68,28 @@ nano env
 
 ```bash
 # Configuración del servidor
-NODE_ENV=development
+NODE_ENV=production
 PORT=3001
 SKIP_DATABASE=true
 
 # API Key para autenticación
-API_KEY=dev-api-key-12345
+API_KEY=your-secure-api-key
 
-# Phantombuster API (opcional para pruebas)
-PHANTOMBUSTER_API_KEY=your-api-key
-PHANTOMBUSTER_AGENT_ID=your-agent-id
+# Phantombuster API (REQUERIDO para producción)
+PHANTOMBUSTER_API_KEY=your-phantombuster-api-key
+PHANTOMBUSTER_AGENT_ID=your-phantombuster-agent-id
 
 # Redis (opcional para cache)
 REDIS_URL=redis://localhost:6379
 ```
+
+### ⚠️ Configuración de Phantombuster
+
+Para usar la API real de Phantombuster, necesitas:
+
+1. **API Key de Phantombuster**: Obtén tu API key desde el panel de Phantombuster
+2. **Agent ID**: ID del agente de LinkedIn que quieres usar para las búsquedas
+3. **Configurar el agente**: Asegúrate de que tu agente esté configurado correctamente en Phantombuster
 
 ### 4. Ejecutar con Docker
 
@@ -141,6 +152,39 @@ curl http://localhost:3001/api/health
 }
 ```
 
+### Clasificación Automática de Leads por Grado de Conexión
+
+Cuando envías un array de leads con el campo `connectionDegree` (`1st`, `2nd`, `3rd`), el endpoint `/api/leads/process` agrega automáticamente el campo `leadType`:
+
+- `1st` → `hot` (contacto directo)
+- `2nd` → `warm` (segundo grado)
+- `3rd` o cualquier otro → `cold` (tercer grado o desconocido)
+
+**Ejemplo de request:**
+
+```json
+{
+  "leads": [
+    { "first_name": "Juan", "connectionDegree": "1st" },
+    { "first_name": "Ana", "connectionDegree": "2nd" },
+    { "first_name": "Pedro", "connectionDegree": "3rd" }
+  ]
+}
+```
+
+**Respuesta:**
+
+```json
+{
+  "success": true,
+  "data": [
+    { "first_name": "Juan", "connectionDegree": "1st", "leadType": "hot" },
+    { "first_name": "Ana", "connectionDegree": "2nd", "leadType": "warm" },
+    { "first_name": "Pedro", "connectionDegree": "3rd", "leadType": "cold" }
+  ]
+}
+```
+
 ## 🔍 Endpoints Disponibles
 
 ### Health Check (Sin Autenticación)
@@ -167,6 +211,12 @@ curl http://localhost:3001/api/health
 | GET    | `/api/search/list`              | Listar todas las búsquedas                    |
 | GET    | `/api/search/active`            | Búsquedas activas                             |
 
+### Procesamiento y Clasificación de Leads
+
+| Método | Endpoint             | Descripción                                                          |
+| ------ | -------------------- | -------------------------------------------------------------------- |
+| POST   | `/api/leads/process` | Procesa un array de leads y agrega el campo leadType automáticamente |
+
 ### Exportación de Datos
 
 | Método | Endpoint                            | Descripción     |
@@ -182,12 +232,27 @@ curl http://localhost:3001/api/health
 
 ## 🎯 Ejemplos de Uso
 
-### 1. Búsqueda Básica
+### 1. Procesar y clasificar leads por grado de conexión
+
+```bash
+curl -X POST http://localhost:3001/api/leads/process \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-api-key-12345" \
+  -d '{
+    "leads": [
+      { "first_name": "Juan", "connectionDegree": "1st" },
+      { "first_name": "Ana", "connectionDegree": "2nd" },
+      { "first_name": "Pedro", "connectionDegree": "3rd" }
+    ]
+  }'
+```
+
+### 2. Búsqueda Real en Phantombuster
 
 ```bash
 curl -X POST http://localhost:3001/api/search/start \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: dev-api-key-12345" \
+  -H "X-API-Key: your-secure-api-key" \
   -d '{
     "searchParams": {
       "job_title": "Software Engineer"
@@ -199,7 +264,23 @@ curl -X POST http://localhost:3001/api/search/start \
   }'
 ```
 
-### 2. Búsqueda con Ubicación Específica (Francia)
+**Respuesta:**
+
+```json
+{
+  "success": true,
+  "message": "Búsqueda iniciada en Phantombuster",
+  "data": {
+    "searchId": "search_1234567890_abc123",
+    "containerId": "container_1234567890_xyz789",
+    "status": "running",
+    "progress": 10,
+    "message": "La búsqueda está ejecutándose en Phantombuster. Usa /api/search/status/:searchId para monitorear el progreso."
+  }
+}
+```
+
+### 3. Búsqueda con Ubicación Específica (Francia)
 
 ```bash
 curl -X POST http://localhost:3001/api/search/start \
@@ -220,7 +301,7 @@ curl -X POST http://localhost:3001/api/search/start \
   }'
 ```
 
-### 3. Búsqueda con Industrias Específicas
+### 4. Búsqueda con Industrias Específicas
 
 ```bash
 curl -X POST http://localhost:3001/api/search/start \
@@ -239,14 +320,67 @@ curl -X POST http://localhost:3001/api/search/start \
   }'
 ```
 
-### 4. Obtener Resultados
+### 5. Monitorear Estado de Búsqueda
+
+```bash
+curl -X GET "http://localhost:3001/api/search/status/SEARCH_ID" \
+  -H "X-API-Key: your-secure-api-key"
+```
+
+**Respuesta:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "searchId": "search_1234567890_abc123",
+    "containerId": "container_1234567890_xyz789",
+    "status": "running",
+    "progress": 45,
+    "totalResults": 0
+  }
+}
+```
+
+### 6. Obtener Resultados Reales
 
 ```bash
 curl -X GET "http://localhost:3001/api/search/results/SEARCH_ID" \
-  -H "X-API-Key: dev-api-key-12345"
+  -H "X-API-Key: your-secure-api-key"
 ```
 
-### 5. Exportar Datos
+**Respuesta con connectionDegree:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "searchId": "search_1234567890_abc123",
+    "status": "completed",
+    "leads": [
+      {
+        "linkedin_url": "https://linkedin.com/in/john-doe",
+        "first_name": "John",
+        "last_name": "Doe",
+        "headline": "Software Engineer at Tech Corp",
+        "company_name": "Tech Corp",
+        "location": "San Francisco, CA",
+        "industry": "Technology",
+        "email": "john.doe@techcorp.com",
+        "phone": "+1 (555) 123-4567",
+        "connectionDegree": "2nd",
+        "mutual_connections": 5,
+        "connection_level": 2,
+        "extracted_at": "2024-01-05T17:12:00.000Z"
+      }
+    ],
+    "total": 1,
+    "connectionDegree_available": true
+  }
+}
+```
+
+### 6. Exportar Datos
 
 ```bash
 # Exportar a JSON
@@ -457,4 +591,5 @@ Para soporte técnico o preguntas:
 ---
 
 **¡Disfruta usando la API de Phantombuster Local! 🚀**
+
 # api-phamthonbuster
