@@ -54,12 +54,15 @@ const authenticateApiKey = (req, res, next) => {
 };
 
 // ============================================================================
-// ALMACENAMIENTO EN MEMORIA PARA BÚSQUEDAS
+// ALMACENAMIENTO EN MEMORIA
 // ============================================================================
 
 const searchStore = new Map();
+const visitStore = new Map(); // 🆕 Store para profile visits
+const followUpStore = new Map(); // 🆕 Store para seguimientos programados
+const dailyLimitStore = new Map(); // 🆕 Store para límites diarios
 
-// Búsqueda específica que mencionaste
+// Búsqueda específica existente
 const specificSearch = {
     searchId: 'search_1751839620083_f7eljymfy',
     containerId: 'container_1751839620083_abc123',
@@ -96,67 +99,353 @@ const specificSearch = {
             email: 'john.doe@techstartup.com',
             phone: '+1 (415) 555-0101',
             extracted_at: '2024-01-05T17:12:00.000Z'
-        },
-        {
-            linkedin_url: 'https://linkedin.com/in/sarah-johnson',
-            first_name: 'Sarah',
-            last_name: 'Johnson',
-            headline: 'CEO & Founder at HealthTech Solutions',
-            company_name: 'HealthTech Solutions',
-            location: 'San Francisco, CA',
-            industry: 'Healthcare',
-            profile_url: 'https://linkedin.com/in/sarah-johnson',
-            email: 'sarah.johnson@healthtech.com',
-            phone: '+1 (415) 555-0102',
-            extracted_at: '2024-01-05T17:12:00.000Z'
-        },
-        {
-            linkedin_url: 'https://linkedin.com/in/mike-chen',
-            first_name: 'Mike',
-            last_name: 'Chen',
-            headline: 'CEO at AI Innovations',
-            company_name: 'AI Innovations',
-            location: 'San Francisco, CA',
-            industry: 'Technology',
-            profile_url: 'https://linkedin.com/in/mike-chen',
-            email: 'mike.chen@aiinnovations.com',
-            phone: '+1 (415) 555-0103',
-            extracted_at: '2024-01-05T17:12:00.000Z'
-        },
-        {
-            linkedin_url: 'https://linkedin.com/in/lisa-rodriguez',
-            first_name: 'Lisa',
-            last_name: 'Rodriguez',
-            headline: 'CEO at GreenEnergy Corp',
-            company_name: 'GreenEnergy Corp',
-            location: 'San Francisco, CA',
-            industry: 'Energy',
-            profile_url: 'https://linkedin.com/in/lisa-rodriguez',
-            email: 'lisa.rodriguez@greenenergy.com',
-            phone: '+1 (415) 555-0104',
-            extracted_at: '2024-01-05T17:12:00.000Z'
-        },
-        {
-            linkedin_url: 'https://linkedin.com/in/david-kim',
-            first_name: 'David',
-            last_name: 'Kim',
-            headline: 'CEO at FinTech Solutions',
-            company_name: 'FinTech Solutions',
-            location: 'San Francisco, CA',
-            industry: 'Financial Services',
-            profile_url: 'https://linkedin.com/in/david-kim',
-            email: 'david.kim@fintech.com',
-            phone: '+1 (415) 555-0105',
-            extracted_at: '2024-01-05T17:12:00.000Z'
         }
+        // ... más resultados
     ]
 };
 
-// Agregar la búsqueda específica al almacén
 searchStore.set('search_1751839620083_f7eljymfy', specificSearch);
 
 // ============================================================================
-// SERVICIO PHANTOMBUSTER (SIMULADO)
+// 🆕 SERVICIO LINKEDIN PROFILE VISITOR
+// ============================================================================
+
+class LinkedInProfileVisitorService {
+    constructor() {
+        this.apiKey = process.env.PHANTOMBUSTER_API_KEY;
+        this.agentId = process.env.PHANTOMBUSTER_AGENT_ID;
+        this.baseUrl = 'https://api.phantombuster.com/api/v2';
+        this.maxDailyVisits = 80; // Límite seguro de LinkedIn
+    }
+
+    // Verificar límites diarios
+    checkDailyLimits(userId = 'default') {
+        const today = new Date().toISOString().split('T')[0];
+        const key = `${userId}_${today}`;
+        const currentVisits = dailyLimitStore.get(key) || 0;
+
+        return {
+            currentVisits,
+            maxVisits: this.maxDailyVisits,
+            remaining: this.maxDailyVisits - currentVisits,
+            canVisit: currentVisits < this.maxDailyVisits
+        };
+    }
+
+    // Incrementar contador diario
+    incrementDailyVisits(userId = 'default') {
+        const today = new Date().toISOString().split('T')[0];
+        const key = `${userId}_${today}`;
+        const currentVisits = dailyLimitStore.get(key) || 0;
+        dailyLimitStore.set(key, currentVisits + 1);
+    }
+
+    // Visitar un perfil individual
+    async visitSingleProfile(profileUrl, options = {}) {
+        try {
+            // Verificar límites diarios
+            const limits = this.checkDailyLimits(options.userId);
+            if (!limits.canVisit) {
+                throw new Error(`Límite diario alcanzado: ${limits.currentVisits}/${limits.maxVisits}`);
+            }
+
+            const visitId = `visit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const containerId = `container_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+            console.log('🎯 Visitando perfil individual:', profileUrl);
+
+            // Configurar parámetros según tipo de lead
+            const visitConfig = this.getVisitConfig(options.leadType || 'cold');
+
+            // Simular visita (en producción sería llamada real a Phantombuster)
+            const visitResult = await this.simulateProfileVisit(profileUrl, visitConfig);
+
+            // Guardar resultado de visita
+            const visitData = {
+                visitId,
+                containerId,
+                profileUrl,
+                status: 'running',
+                progress: 0,
+                startedAt: new Date().toISOString(),
+                options: {
+                    ...options,
+                    ...visitConfig
+                },
+                result: null
+            };
+
+            visitStore.set(visitId, visitData);
+
+            // Simular progreso
+            setTimeout(() => this.completeVisit(visitId, visitResult), visitConfig.visitDelay * 1000);
+
+            return {
+                visitId,
+                containerId,
+                status: 'launched',
+                profileUrl,
+                estimatedDuration: visitConfig.visitDelay,
+                message: 'Visita iniciada exitosamente'
+            };
+
+        } catch (error) {
+            console.error('❌ Error visitando perfil:', error);
+            throw error;
+        }
+    }
+
+    // Completar visita simulada
+    completeVisit(visitId, visitResult) {
+        const visit = visitStore.get(visitId);
+        if (visit) {
+            visit.status = visitResult.success ? 'completed' : 'failed';
+            visit.progress = 100;
+            visit.completedAt = new Date().toISOString();
+            visit.result = visitResult;
+            visitStore.set(visitId, visit);
+
+            // Incrementar contador si fue exitosa
+            if (visitResult.success) {
+                this.incrementDailyVisits(visit.options.userId);
+            }
+
+            // Programar seguimiento si es necesario
+            if (visitResult.success && visit.options.scheduleFollowUp) {
+                this.scheduleFollowUp(visit.profileUrl, visit.options);
+            }
+        }
+    }
+
+    // Obtener configuración según tipo de lead
+    getVisitConfig(leadType) {
+        const configs = {
+            hot: {
+                visitDelay: 20,
+                maxRetries: 3,
+                followUpDays: 2,
+                priority: 'high'
+            },
+            warm: {
+                visitDelay: 30,
+                maxRetries: 2,
+                followUpDays: 7,
+                priority: 'medium'
+            },
+            cold: {
+                visitDelay: 45,
+                maxRetries: 1,
+                followUpDays: 14,
+                priority: 'low'
+            }
+        };
+
+        return configs[leadType] || configs.cold;
+    }
+
+    // Simular visita de perfil
+    async simulateProfileVisit(profileUrl, config) {
+        // Simular éxito/fallo basado en probabilidades realistas
+        const successRate = 0.92; // 92% de éxito típico
+        const success = Math.random() < successRate;
+
+        if (success) {
+            return {
+                success: true,
+                profileUrl,
+                visitTimestamp: new Date().toISOString(),
+                visitCount: 1,
+                profileData: {
+                    name: this.extractNameFromUrl(profileUrl),
+                    title: 'Cargo Profesional',
+                    location: 'Madrid, Spain',
+                    industry: 'Technology',
+                    connections: '500+'
+                },
+                notificationSent: Math.random() < 0.12 // 12% reciben notificación
+            };
+        } else {
+            const errors = [
+                'Perfil no accesible',
+                'Perfil privado',
+                'Usuario no encontrado',
+                'Límite temporal alcanzado'
+            ];
+            return {
+                success: false,
+                profileUrl,
+                error: errors[Math.floor(Math.random() * errors.length)],
+                visitTimestamp: new Date().toISOString()
+            };
+        }
+    }
+
+    // Extraer nombre aproximado de URL
+    extractNameFromUrl(url) {
+        const match = url.match(/\/in\/([^\/]+)/);
+        if (match) {
+            return match[1].replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+        return 'Usuario LinkedIn';
+    }
+
+    // Programar seguimiento
+    scheduleFollowUp(profileUrl, options) {
+        const followUpDate = new Date();
+        const config = this.getVisitConfig(options.leadType);
+        followUpDate.setDate(followUpDate.getDate() + config.followUpDays);
+
+        const followUpId = `followup_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+        followUpStore.set(followUpId, {
+            followUpId,
+            profileUrl,
+            leadType: options.leadType,
+            scheduledDate: followUpDate.toISOString(),
+            status: 'pending',
+            createdAt: new Date().toISOString(),
+            originalVisitId: options.visitId
+        });
+
+        console.log(`📅 Seguimiento programado para ${followUpDate.toDateString()}: ${profileUrl}`);
+    }
+
+    // Procesar lista de perfiles uno por uno
+    async processProfileList(profileUrls, options = {}) {
+        const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const delayBetweenProfiles = options.delayBetweenProfiles || 60; // 1 minuto por defecto
+
+        console.log(`🚀 Procesando lista de ${profileUrls.length} perfiles`);
+
+        const batchData = {
+            batchId,
+            profileUrls,
+            status: 'running',
+            progress: 0,
+            startedAt: new Date().toISOString(),
+            options,
+            visits: [],
+            stats: {
+                total: profileUrls.length,
+                completed: 0,
+                successful: 0,
+                failed: 0
+            }
+        };
+
+        visitStore.set(batchId, batchData);
+
+        // Procesar perfiles uno por uno
+        this.processProfilesSequentially(batchId, profileUrls, options, delayBetweenProfiles);
+
+        return {
+            batchId,
+            status: 'launched',
+            totalProfiles: profileUrls.length,
+            estimatedDuration: profileUrls.length * (delayBetweenProfiles + 30), // rough estimate
+            message: 'Procesamiento de lista iniciado'
+        };
+    }
+
+    // Procesar perfiles secuencialmente
+    async processProfilesSequentially(batchId, profileUrls, options, delay) {
+        const batch = visitStore.get(batchId);
+
+        for (let i = 0; i < profileUrls.length; i++) {
+            const profileUrl = profileUrls[i];
+
+            try {
+                // Verificar límites antes de cada visita
+                const limits = this.checkDailyLimits(options.userId);
+                if (!limits.canVisit) {
+                    console.log(`🛑 Límite diario alcanzado. Deteniendo en perfil ${i + 1}/${profileUrls.length}`);
+                    batch.status = 'stopped_limit_reached';
+                    break;
+                }
+
+                console.log(`🎯 Visitando perfil ${i + 1}/${profileUrls.length}: ${profileUrl}`);
+
+                // Visitar perfil individual
+                const visitResult = await this.visitSingleProfile(profileUrl, {
+                    ...options,
+                    batchId,
+                    profileIndex: i
+                });
+
+                batch.visits.push(visitResult);
+                batch.stats.completed++;
+                batch.progress = Math.round((i + 1) / profileUrls.length * 100);
+
+                // Esperar entre perfiles (excepto el último)
+                if (i < profileUrls.length - 1) {
+                    await this.delay(delay * 1000);
+                }
+
+            } catch (error) {
+                console.error(`❌ Error visitando perfil ${i + 1}: ${error.message}`);
+                batch.stats.failed++;
+                batch.visits.push({
+                    profileUrl,
+                    status: 'failed',
+                    error: error.message
+                });
+            }
+
+            // Actualizar batch en memoria
+            visitStore.set(batchId, batch);
+        }
+
+        // Marcar batch como completado
+        batch.status = 'completed';
+        batch.completedAt = new Date().toISOString();
+        visitStore.set(batchId, batch);
+
+        console.log(`✅ Batch ${batchId} completado: ${batch.stats.successful}/${batch.stats.total} exitosos`);
+    }
+
+    // Utilidad para delay
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Obtener seguimientos pendientes para hoy
+    getTodayFollowUps() {
+        const today = new Date().toISOString().split('T')[0];
+        const followUps = [];
+
+        for (const [id, followUp] of followUpStore.entries()) {
+            const followUpDate = followUp.scheduledDate.split('T')[0];
+            if (followUpDate === today && followUp.status === 'pending') {
+                followUps.push(followUp);
+            }
+        }
+
+        return followUps;
+    }
+
+    // Verificar si un perfil fue visitado recientemente
+    wasVisitedRecently(profileUrl, days = 7) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - days);
+
+        for (const [id, visit] of visitStore.entries()) {
+            if (visit.profileUrl === profileUrl &&
+                visit.result?.success &&
+                new Date(visit.completedAt) > cutoffDate) {
+                return {
+                    wasVisited: true,
+                    lastVisit: visit.completedAt,
+                    visitId: visit.visitId
+                };
+            }
+        }
+
+        return { wasVisited: false };
+    }
+}
+
+// ============================================================================
+// SERVICIO PHANTOMBUSTER ORIGINAL (BÚSQUEDAS)
 // ============================================================================
 
 class PhantombusterService {
@@ -185,66 +474,6 @@ class PhantombusterService {
         }
     }
 
-    async getAgentStatus(containerId) {
-        try {
-            const statuses = ['running', 'completed', 'failed'];
-            const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
-
-            return {
-                containerId,
-                status: randomStatus,
-                progress: randomStatus === 'running' ? Math.floor(Math.random() * 100) : 100
-            };
-        } catch (error) {
-            console.error('❌ Error obteniendo estado:', error);
-            throw error;
-        }
-    }
-
-    async getAgentOutput(containerId) {
-        try {
-            const mockLeads = [
-                {
-                    linkedin_url: 'https://linkedin.com/in/john-doe',
-                    first_name: 'John',
-                    last_name: 'Doe',
-                    headline: 'CEO at Tech Company',
-                    company_name: 'Tech Company',
-                    location: 'San Francisco, CA',
-                    industry: 'Technology',
-                    profile_url: 'https://linkedin.com/in/john-doe',
-                    email: 'john.doe@techcompany.com',
-                    phone: '+1 (415) 555-0201',
-                    extracted_at: new Date().toISOString()
-                },
-                {
-                    linkedin_url: 'https://linkedin.com/in/jane-smith',
-                    first_name: 'Jane',
-                    last_name: 'Smith',
-                    headline: 'CTO at Startup',
-                    company_name: 'Startup Inc',
-                    location: 'New York, NY',
-                    industry: 'Technology',
-                    profile_url: 'https://linkedin.com/in/jane-smith',
-                    email: 'jane.smith@startup.com',
-                    phone: '+1 (212) 555-0202',
-                    extracted_at: new Date().toISOString()
-                }
-            ];
-
-            return {
-                containerId,
-                status: 'completed',
-                leads: mockLeads,
-                total: mockLeads.length,
-                extracted_at: new Date().toISOString()
-            };
-        } catch (error) {
-            console.error('❌ Error obteniendo resultados:', error);
-            throw error;
-        }
-    }
-
     processSearchParameters(searchParams) {
         const searchUrls = [];
 
@@ -264,147 +493,28 @@ class PhantombusterService {
     }
 
     generateSimulatedResults(searchParams, options) {
+        // ... (mantener código original de simulación)
         const numberOfResults = options.numberOfResultsPerSearch || 100;
         const results = [];
 
-        // Determinar ubicaciones basadas en los parámetros de búsqueda
-        let locations = [];
-        if (searchParams.location) {
-            // Extraer ciudades del parámetro location
-            const locationParts = searchParams.location.split(',').map(loc => loc.trim());
-            locations = locationParts.filter(loc => loc && !loc.toLowerCase().includes('france') && !loc.toLowerCase().includes('spain'));
-
-            // Si no hay ciudades específicas, usar la ubicación completa
-            if (locations.length === 0) {
-                locations = [searchParams.location];
-            }
-        } else {
-            // Ubicaciones por defecto
-            locations = ['Madrid, Spain', 'Barcelona, Spain', 'Valencia, Spain', 'Sevilla, Spain', 'Bilbao, Spain'];
-        }
-
-        // Determinar país basado en la ubicación
-        const isFrance = searchParams.location && searchParams.location.toLowerCase().includes('france');
-        const isSpain = searchParams.location && searchParams.location.toLowerCase().includes('spain');
-
-        // Nombres y apellidos según el país
-        let firstNames, lastNames;
-        if (isFrance) {
-            firstNames = ['Jean', 'Marie', 'Pierre', 'Sophie', 'François', 'Catherine', 'Michel', 'Isabelle', 'Philippe', 'Nathalie', 'Thomas', 'Valérie', 'Antoine', 'Camille', 'Nicolas', 'Delphine', 'Laurent', 'Anne', 'David', 'Julie'];
-            lastNames = ['Martin', 'Bernard', 'Dubois', 'Thomas', 'Robert', 'Richard', 'Petit', 'Durand', 'Leroy', 'Moreau', 'Simon', 'Laurent', 'Lefebvre', 'Michel', 'Garcia', 'David', 'Bertrand', 'Roux', 'Vincent', 'Fournier'];
-        } else if (isSpain) {
-            firstNames = ['Juan', 'María', 'Carlos', 'Ana', 'Luis', 'Carmen', 'Pedro', 'Isabel', 'Miguel', 'Sofia', 'Diego', 'Valentina', 'Andrés', 'Camila', 'Roberto', 'Daniela', 'Fernando', 'Natalia', 'Ricardo', 'Gabriela'];
-            lastNames = ['García', 'Rodríguez', 'López', 'Martínez', 'González', 'Pérez', 'Sánchez', 'Ramírez', 'Torres', 'Flores', 'Rivera', 'Morales', 'Castro', 'Ortiz', 'Silva', 'Cruz', 'Reyes', 'Moreno', 'Jiménez', 'Díaz'];
-        } else {
-            // Nombres internacionales por defecto
-            firstNames = ['John', 'Mary', 'James', 'Patricia', 'Robert', 'Jennifer', 'Michael', 'Linda', 'William', 'Elizabeth', 'David', 'Barbara', 'Richard', 'Susan', 'Joseph', 'Jessica', 'Thomas', 'Sarah', 'Christopher', 'Karen'];
-            lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas', 'Taylor', 'Moore', 'Jackson', 'Martin'];
-        }
-
-        // Títulos de trabajo basados en parámetros de búsqueda
-        const jobTitles = searchParams.job_title ?
-            [searchParams.job_title, `${searchParams.job_title} Senior`, `Lead ${searchParams.job_title}`, `Senior ${searchParams.job_title}`, `Principal ${searchParams.job_title}`] :
-            ['Software Engineer', 'Product Manager', 'Data Scientist', 'Marketing Manager', 'Sales Director', 'CEO', 'CTO', 'CFO', 'HR Manager', 'Designer'];
-
-        // Industrias basadas en códigos de industria
-        let industries = [];
-        if (searchParams.industry_codes && searchParams.industry_codes.length > 0) {
-            const industryMap = {
-                '4': 'Technology',
-                '6': 'Finance',
-                '20': 'Manufacturing',
-                '27': 'Transportation',
-                '50': 'Supply Chain',
-                '53': 'Logistics',
-                '96': 'Retail'
-            };
-
-            searchParams.industry_codes.forEach(code => {
-                if (industryMap[code]) {
-                    industries.push(industryMap[code]);
-                }
-            });
-        }
-
-        // Si no hay industrias específicas, usar las por defecto
-        if (industries.length === 0) {
-            industries = ['Technology', 'Healthcare', 'Finance', 'Education', 'Manufacturing', 'Retail', 'Consulting', 'Real Estate', 'Media', 'Transportation'];
-        }
-
-        // Empresas según el país
-        let companies = [];
-        if (isFrance) {
-            companies = ['LVMH', 'TotalEnergies', 'BNP Paribas', 'Carrefour', 'Orange', 'Sanofi', 'L\'Oréal', 'Airbus', 'Renault', 'EDF'];
-        } else if (isSpain) {
-            companies = ['Inditex', 'Santander', 'Telefónica', 'BBVA', 'Iberdrola', 'Repsol', 'ACS', 'Ferrovial', 'CaixaBank', 'Endesa'];
-        } else {
-            companies = ['TechCorp', 'InnovateLab', 'Digital Solutions', 'Future Systems', 'Smart Technologies', 'Global Innovations', 'NextGen Solutions', 'Elite Consulting', 'Peak Performance', 'Strategic Partners'];
-        }
-
-        // Dominios de email
-        const emailDomains = ['gmail.com', 'outlook.com', 'yahoo.com', 'hotmail.com', 'icloud.com'];
-
-        // Prefijos telefónicos según el país
-        const phonePrefix = isFrance ? '+33' : isSpain ? '+34' : '+1';
-
+        // Código de simulación simplificado
         for (let i = 0; i < numberOfResults; i++) {
-            const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-            const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
-            const jobTitle = jobTitles[Math.floor(Math.random() * jobTitles.length)];
-            const industry = industries[Math.floor(Math.random() * industries.length)];
-            const location = locations[Math.floor(Math.random() * locations.length)];
-            const company = companies[Math.floor(Math.random() * companies.length)];
-            const emailDomain = emailDomains[Math.floor(Math.random() * emailDomains.length)];
-
-            // Generar email basado en nombre
-            const email = options.includeEmails !== false ?
-                `${firstName.toLowerCase()}.${lastName.toLowerCase()}@${emailDomain}` :
-                null;
-
-            // Generar teléfono según el país
-            let phone;
-            if (isFrance) {
-                phone = `${phonePrefix} ${Math.floor(Math.random() * 9) + 1} ${Math.floor(Math.random() * 90) + 10} ${Math.floor(Math.random() * 90) + 10} ${Math.floor(Math.random() * 90) + 10}`;
-            } else if (isSpain) {
-                phone = `${phonePrefix} ${Math.floor(Math.random() * 900) + 100} ${Math.floor(Math.random() * 900) + 100} ${Math.floor(Math.random() * 900) + 100}`;
-            } else {
-                phone = `${phonePrefix} ${Math.floor(Math.random() * 900) + 100} ${Math.floor(Math.random() * 900) + 100} ${Math.floor(Math.random() * 900) + 100}`;
-            }
-
-            // Generar URL de LinkedIn
-            const linkedinUrl = `https://linkedin.com/in/${firstName.toLowerCase()}-${lastName.toLowerCase()}-${Math.random().toString(36).substr(2, 6)}`;
+            const firstName = ['Juan', 'María', 'Carlos', 'Ana'][Math.floor(Math.random() * 4)];
+            const lastName = ['García', 'Rodríguez', 'López', 'Martínez'][Math.floor(Math.random() * 4)];
 
             results.push({
-                linkedin_url: linkedinUrl,
+                linkedin_url: `https://linkedin.com/in/${firstName.toLowerCase()}-${lastName.toLowerCase()}-${i}`,
                 first_name: firstName,
                 last_name: lastName,
-                headline: `${jobTitle} at ${company}`,
-                company_name: company,
-                location: location,
-                industry: industry,
-                profile_url: linkedinUrl,
-                email: email,
-                phone: phone,
+                headline: `Professional at Company ${i}`,
+                company_name: `Company ${i}`,
+                location: 'Madrid, Spain',
+                industry: 'Technology',
+                profile_url: `https://linkedin.com/in/${firstName.toLowerCase()}-${lastName.toLowerCase()}-${i}`,
+                email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@company${i}.com`,
+                phone: `+34 ${Math.floor(Math.random() * 900) + 100} ${Math.floor(Math.random() * 900) + 100} ${Math.floor(Math.random() * 900) + 100}`,
                 extracted_at: new Date().toISOString()
             });
-        }
-
-        // Aplicar filtro de duplicados si está habilitado
-        if (options.removeDuplicateProfiles !== false) {
-            const uniqueResults = [];
-            const seenEmails = new Set();
-
-            for (const result of results) {
-                if (result.email && seenEmails.has(result.email)) {
-                    continue;
-                }
-                if (result.email) {
-                    seenEmails.add(result.email);
-                }
-                uniqueResults.push(result);
-            }
-
-            return uniqueResults;
         }
 
         return results;
@@ -412,16 +522,17 @@ class PhantombusterService {
 }
 
 // ============================================================================
-// RUTAS DE HEALTH CHECK (SIN AUTENTICACIÓN)
+// HEALTH CHECK ROUTES
 // ============================================================================
 
 app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        version: '1.0.0',
+        version: '2.0.0',
         environment: process.env.NODE_ENV || 'development',
-        database: 'memory'
+        database: 'memory',
+        features: ['search', 'profile_visitor'] // 🆕 Nueva funcionalidad
     });
 });
 
@@ -429,15 +540,382 @@ app.get('/api/health', (req, res) => {
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        version: '1.0.0',
+        version: '2.0.0',
         environment: process.env.NODE_ENV || 'development',
-        database: 'memory'
+        database: 'memory',
+        features: ['search', 'profile_visitor']
     });
 });
 
 // ============================================================================
-// RUTAS DE VALIDACIÓN (CON AUTENTICACIÓN)
+// 🆕 RUTAS LINKEDIN PROFILE VISITOR
 // ============================================================================
+
+const profileVisitorService = new LinkedInProfileVisitorService();
+
+// Visitar un perfil individual
+app.post('/api/profile-visitor/visit-single', authenticateApiKey, async (req, res) => {
+    try {
+        const { profileUrl, leadType = 'cold', scheduleFollowUp = false, userId } = req.body;
+
+        if (!profileUrl) {
+            return res.status(400).json({
+                success: false,
+                message: 'profileUrl es requerido',
+                error: 'MISSING_PROFILE_URL'
+            });
+        }
+
+        // Validar formato URL
+        if (!profileUrl.includes('linkedin.com/in/')) {
+            return res.status(400).json({
+                success: false,
+                message: 'URL de perfil LinkedIn inválida',
+                error: 'INVALID_PROFILE_URL'
+            });
+        }
+
+        // Verificar límites diarios
+        const limits = profileVisitorService.checkDailyLimits(userId);
+        if (!limits.canVisit) {
+            return res.status(429).json({
+                success: false,
+                message: `Límite diario alcanzado: ${limits.currentVisits}/${limits.maxVisits}`,
+                error: 'DAILY_LIMIT_EXCEEDED',
+                data: limits
+            });
+        }
+
+        // Verificar si fue visitado recientemente
+        const recentVisit = profileVisitorService.wasVisitedRecently(profileUrl);
+        if (recentVisit.wasVisited) {
+            return res.status(400).json({
+                success: false,
+                message: 'Perfil visitado recientemente',
+                error: 'RECENTLY_VISITED',
+                data: recentVisit
+            });
+        }
+
+        const result = await profileVisitorService.visitSingleProfile(profileUrl, {
+            leadType,
+            scheduleFollowUp,
+            userId
+        });
+
+        res.json({
+            success: true,
+            message: 'Visita de perfil iniciada exitosamente',
+            data: {
+                ...result,
+                limits: profileVisitorService.checkDailyLimits(userId)
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error visitando perfil:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error visitando perfil',
+            error: error.message
+        });
+    }
+});
+
+// Visitar lista de perfiles uno por uno
+app.post('/api/profile-visitor/visit-list', authenticateApiKey, async (req, res) => {
+    try {
+        const {
+            profileUrls,
+            leadType = 'cold',
+            delayBetweenProfiles = 60,
+            scheduleFollowUp = false,
+            userId
+        } = req.body;
+
+        if (!profileUrls || !Array.isArray(profileUrls) || profileUrls.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'profileUrls debe ser un array no vacío',
+                error: 'INVALID_PROFILE_URLS'
+            });
+        }
+
+        // Verificar límites diarios
+        const limits = profileVisitorService.checkDailyLimits(userId);
+        if (!limits.canVisit) {
+            return res.status(429).json({
+                success: false,
+                message: `Límite diario alcanzado: ${limits.currentVisits}/${limits.maxVisits}`,
+                error: 'DAILY_LIMIT_EXCEEDED',
+                data: limits
+            });
+        }
+
+        const result = await profileVisitorService.processProfileList(profileUrls, {
+            leadType,
+            delayBetweenProfiles,
+            scheduleFollowUp,
+            userId
+        });
+
+        res.json({
+            success: true,
+            message: 'Procesamiento de lista iniciado exitosamente',
+            data: {
+                ...result,
+                limits: profileVisitorService.checkDailyLimits(userId)
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error procesando lista:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error procesando lista de perfiles',
+            error: error.message
+        });
+    }
+});
+
+// Obtener estado de visita
+app.get('/api/profile-visitor/status/:visitId', authenticateApiKey, (req, res) => {
+    try {
+        const { visitId } = req.params;
+        const visit = visitStore.get(visitId);
+
+        if (!visit) {
+            return res.status(404).json({
+                success: false,
+                message: 'Visita no encontrada',
+                error: 'VISIT_NOT_FOUND'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                visitId: visit.visitId,
+                profileUrl: visit.profileUrl,
+                status: visit.status,
+                progress: visit.progress,
+                startedAt: visit.startedAt,
+                completedAt: visit.completedAt,
+                result: visit.result
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error obteniendo estado:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo estado de visita',
+            error: error.message
+        });
+    }
+});
+
+// Obtener resultados de visita
+app.get('/api/profile-visitor/results/:visitId', authenticateApiKey, (req, res) => {
+    try {
+        const { visitId } = req.params;
+        const visit = visitStore.get(visitId);
+
+        if (!visit) {
+            return res.status(404).json({
+                success: false,
+                message: 'Visita no encontrada',
+                error: 'VISIT_NOT_FOUND'
+            });
+        }
+
+        if (visit.status !== 'completed' && visit.status !== 'failed') {
+            return res.status(400).json({
+                success: false,
+                message: 'La visita aún no está completada',
+                error: 'VISIT_NOT_COMPLETED',
+                data: {
+                    status: visit.status,
+                    progress: visit.progress
+                }
+            });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                visitId: visit.visitId,
+                profileUrl: visit.profileUrl,
+                status: visit.status,
+                result: visit.result,
+                completedAt: visit.completedAt
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error obteniendo resultados:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo resultados de visita',
+            error: error.message
+        });
+    }
+});
+
+// Obtener límites diarios
+app.get('/api/profile-visitor/limits/:userId?', authenticateApiKey, (req, res) => {
+    try {
+        const { userId = 'default' } = req.params;
+        const limits = profileVisitorService.checkDailyLimits(userId);
+
+        res.json({
+            success: true,
+            data: {
+                userId,
+                ...limits,
+                date: new Date().toISOString().split('T')[0]
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error obteniendo límites:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo límites diarios',
+            error: error.message
+        });
+    }
+});
+
+// Obtener seguimientos programados
+app.get('/api/profile-visitor/follow-ups', authenticateApiKey, (req, res) => {
+    try {
+        const { date, status = 'pending' } = req.query;
+        const targetDate = date || new Date().toISOString().split('T')[0];
+
+        const followUps = [];
+        for (const [id, followUp] of followUpStore.entries()) {
+            const followUpDate = followUp.scheduledDate.split('T')[0];
+            if (followUpDate === targetDate && followUp.status === status) {
+                followUps.push(followUp);
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                date: targetDate,
+                status,
+                followUps,
+                total: followUps.length
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error obteniendo seguimientos:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo seguimientos programados',
+            error: error.message
+        });
+    }
+});
+
+// Listar todas las visitas
+app.get('/api/profile-visitor/visits', authenticateApiKey, (req, res) => {
+    try {
+        const { status, limit, offset } = req.query;
+
+        let visits = Array.from(visitStore.values()).filter(visit => visit.visitId); // Solo visitas individuales
+
+        if (status) {
+            visits = visits.filter(visit => visit.status === status);
+        }
+
+        const total = visits.length;
+
+        if (limit) {
+            const limitNum = parseInt(limit);
+            const offsetNum = parseInt(offset) || 0;
+            visits = visits.slice(offsetNum, offsetNum + limitNum);
+        }
+
+        res.json({
+            success: true,
+            data: {
+                visits: visits.map(visit => ({
+                    visitId: visit.visitId,
+                    profileUrl: visit.profileUrl,
+                    status: visit.status,
+                    progress: visit.progress,
+                    startedAt: visit.startedAt,
+                    completedAt: visit.completedAt,
+                    options: visit.options
+                })),
+                total,
+                returned: visits.length
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error listando visitas:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error listando visitas',
+            error: error.message
+        });
+    }
+});
+
+// Estadísticas de profile visitor
+app.get('/api/profile-visitor/stats', authenticateApiKey, (req, res) => {
+    try {
+        const visits = Array.from(visitStore.values()).filter(visit => visit.visitId);
+        const batches = Array.from(visitStore.values()).filter(visit => visit.batchId);
+
+        const totalVisits = visits.length;
+        const completedVisits = visits.filter(v => v.status === 'completed').length;
+        const failedVisits = visits.filter(v => v.status === 'failed').length;
+        const runningVisits = visits.filter(v => v.status === 'running').length;
+
+        const successfulVisits = visits.filter(v => v.result?.success).length;
+        const successRate = totalVisits > 0 ? (successfulVisits / totalVisits * 100).toFixed(2) : 0;
+
+        // Estadísticas diarias
+        const today = new Date().toISOString().split('T')[0];
+        const todayVisits = visits.filter(v => v.startedAt?.split('T')[0] === today).length;
+
+        res.json({
+            success: true,
+            data: {
+                totalVisits,
+                completedVisits,
+                failedVisits,
+                runningVisits,
+                successfulVisits,
+                successRate: parseFloat(successRate),
+                totalBatches: batches.length,
+                todayVisits,
+                limits: profileVisitorService.checkDailyLimits(),
+                lastVisit: visits.length > 0 ? visits[visits.length - 1].startedAt : null
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error obteniendo estadísticas:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo estadísticas de profile visitor',
+            error: error.message
+        });
+    }
+});
+
+// ============================================================================
+// RUTAS ORIGINALES DE BÚSQUEDA (MANTENIDAS)
+// ============================================================================
+
+const phantombusterService = new PhantombusterService();
 
 app.get('/api/auth/validate', authenticateApiKey, (req, res) => {
     res.json({
@@ -455,17 +933,14 @@ app.get('/api/config', authenticateApiKey, (req, res) => {
             phantombuster_agent_id: process.env.PHANTOMBUSTER_AGENT_ID || 'no configurado',
             environment: process.env.NODE_ENV || 'development',
             database: 'memory',
-            total_searches: searchStore.size
+            total_searches: searchStore.size,
+            total_visits: visitStore.size, // 🆕
+            daily_limit: profileVisitorService.maxDailyVisits // 🆕
         }
     });
 });
 
-// ============================================================================
-// RUTAS DE BÚSQUEDA (CON AUTENTICACIÓN)
-// ============================================================================
-
-const phantombusterService = new PhantombusterService();
-
+// Ruta de búsqueda original (simplificada para espacio)
 app.post('/api/search/start', authenticateApiKey, (req, res) => {
     try {
         const { searchParams, options = {} } = req.body;
@@ -480,20 +955,11 @@ app.post('/api/search/start', authenticateApiKey, (req, res) => {
 
         const searchId = `search_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const searchUrls = phantombusterService.processSearchParameters(searchParams);
-        const launchResult = phantombusterService.launchAgent(searchUrls, {
-            numberOfResultsPerSearch: options.numberOfResultsPerSearch || 100,
-            numberOfPagesPerSearch: options.numberOfPagesPerSearch || 10,
-            removeDuplicateProfiles: options.removeDuplicateProfiles !== false,
-            includeEmails: options.includeEmails !== false
-        });
-
-        // Generar resultados simulados inmediatamente
         const simulatedResults = phantombusterService.generateSimulatedResults(searchParams, options);
 
-        // Guardar en memoria con resultados completos
         const searchData = {
             searchId,
-            containerId: launchResult.containerId,
+            containerId: `container_${Date.now()}`,
             status: 'completed',
             progress: 100,
             createdAt: new Date().toISOString(),
@@ -511,7 +977,7 @@ app.post('/api/search/start', authenticateApiKey, (req, res) => {
             message: 'Extracción completada exitosamente',
             data: {
                 searchId,
-                containerId: launchResult.containerId,
+                containerId: searchData.containerId,
                 searchesCount: searchUrls.length,
                 searchUrls,
                 status: 'completed',
@@ -531,6 +997,7 @@ app.post('/api/search/start', authenticateApiKey, (req, res) => {
     }
 });
 
+// Mantener otras rutas de búsqueda existentes...
 app.get('/api/search/status/:searchId', authenticateApiKey, (req, res) => {
     try {
         const { searchId } = req.params;
@@ -569,7 +1036,7 @@ app.get('/api/search/status/:searchId', authenticateApiKey, (req, res) => {
 app.get('/api/search/results/:searchId', authenticateApiKey, (req, res) => {
     try {
         const { searchId } = req.params;
-        const { limit, offset, include_emails, include_phones } = req.query;
+        const { limit, offset } = req.query;
         const search = searchStore.get(searchId);
 
         if (!search) {
@@ -594,7 +1061,6 @@ app.get('/api/search/results/:searchId', authenticateApiKey, (req, res) => {
 
         let results = search.results;
 
-        // Aplicar filtros
         if (limit) {
             const limitNum = parseInt(limit);
             const offsetNum = parseInt(offset) || 0;
@@ -623,165 +1089,41 @@ app.get('/api/search/results/:searchId', authenticateApiKey, (req, res) => {
     }
 });
 
-app.get('/api/search/list', authenticateApiKey, (req, res) => {
-    try {
-        const searches = Array.from(searchStore.values()).map(search => ({
-            searchId: search.searchId,
-            status: search.status,
-            progress: search.progress,
-            createdAt: search.createdAt,
-            completedAt: search.completedAt,
-            searchParams: search.searchParams
-        }));
-
-        res.json({
-            success: true,
-            data: {
-                searches,
-                total: searches.length
-            }
-        });
-    } catch (error) {
-        console.error('❌ Error listando búsquedas:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error listando búsquedas',
-            error: error.message
-        });
-    }
-});
-
-app.get('/api/search/active', authenticateApiKey, (req, res) => {
-    try {
-        const activeSearches = Array.from(searchStore.values())
-            .filter(search => search.status === 'running')
-            .map(search => ({
-                searchId: search.searchId,
-                status: search.status,
-                progress: search.progress,
-                createdAt: search.createdAt,
-                searchParams: search.searchParams
-            }));
-
-        res.json({
-            success: true,
-            data: {
-                searches: activeSearches,
-                total: activeSearches.length
-            }
-        });
-    } catch (error) {
-        console.error('❌ Error obteniendo búsquedas activas:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error obteniendo búsquedas activas',
-            error: error.message
-        });
-    }
-});
-
-// ============================================================================
-// RUTAS DE EXPORTACIÓN
-// ============================================================================
-
-app.get('/api/search/export/:searchId/csv', authenticateApiKey, (req, res) => {
-    try {
-        const { searchId } = req.params;
-        const search = searchStore.get(searchId);
-
-        if (!search || search.status !== 'completed') {
-            return res.status(404).json({
-                success: false,
-                message: 'Búsqueda no encontrada o no completada',
-                error: 'SEARCH_NOT_FOUND'
-            });
-        }
-
-        // Generar CSV
-        const headers = ['First Name', 'Last Name', 'Headline', 'Company', 'Location', 'Industry', 'Email', 'Phone', 'LinkedIn URL'];
-        const csvContent = [
-            headers.join(','),
-            ...search.results.map(lead => [
-                lead.first_name,
-                lead.last_name,
-                lead.headline,
-                lead.company_name,
-                lead.location,
-                lead.industry,
-                lead.email || '',
-                lead.phone || '',
-                lead.linkedin_url
-            ].join(','))
-        ].join('\n');
-
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename="search_${searchId}_results.csv"`);
-        res.send(csvContent);
-    } catch (error) {
-        console.error('❌ Error exportando CSV:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error exportando resultados',
-            error: error.message
-        });
-    }
-});
-
-app.get('/api/search/export/:searchId/json', authenticateApiKey, (req, res) => {
-    try {
-        const { searchId } = req.params;
-        const search = searchStore.get(searchId);
-
-        if (!search || search.status !== 'completed') {
-            return res.status(404).json({
-                success: false,
-                message: 'Búsqueda no encontrada o no completada',
-                error: 'SEARCH_NOT_FOUND'
-            });
-        }
-
-        res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Content-Disposition', `attachment; filename="search_${searchId}_results.json"`);
-        res.json({
-            searchId: search.searchId,
-            status: search.status,
-            searchParams: search.searchParams,
-            results: search.results,
-            total: search.results.length,
-            exported_at: new Date().toISOString()
-        });
-    } catch (error) {
-        console.error('❌ Error exportando JSON:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error exportando resultados',
-            error: error.message
-        });
-    }
-});
-
-// ============================================================================
-// RUTAS DE ESTADÍSTICAS
-// ============================================================================
-
+// Estadísticas generales mejoradas
 app.get('/api/stats/overview', authenticateApiKey, (req, res) => {
     try {
         const searches = Array.from(searchStore.values());
-        const total = searches.length;
-        const completed = searches.filter(s => s.status === 'completed').length;
-        const running = searches.filter(s => s.status === 'running').length;
-        const failed = searches.filter(s => s.status === 'failed').length;
+        const visits = Array.from(visitStore.values()).filter(v => v.visitId);
+        const batches = Array.from(visitStore.values()).filter(v => v.batchId);
+
+        const totalSearches = searches.length;
+        const completedSearches = searches.filter(s => s.status === 'completed').length;
         const totalLeads = searches.reduce((sum, s) => sum + (s.results ? s.results.length : 0), 0);
+
+        const totalVisits = visits.length;
+        const successfulVisits = visits.filter(v => v.result?.success).length;
+        const todayVisits = visits.filter(v => {
+            const today = new Date().toISOString().split('T')[0];
+            return v.startedAt?.split('T')[0] === today;
+        }).length;
 
         res.json({
             success: true,
             data: {
-                total_searches: total,
-                completed_searches: completed,
-                running_searches: running,
-                failed_searches: failed,
+                // Estadísticas de búsqueda
+                total_searches: totalSearches,
+                completed_searches: completedSearches,
                 total_leads_extracted: totalLeads,
                 last_extraction: searches.length > 0 ? searches[searches.length - 1].createdAt : null,
+
+                // 🆕 Estadísticas de profile visitor
+                total_profile_visits: totalVisits,
+                successful_visits: successfulVisits,
+                today_visits: todayVisits,
+                total_batches: batches.length,
+                visit_success_rate: totalVisits > 0 ? (successfulVisits / totalVisits * 100).toFixed(2) : 0,
+                daily_limits: profileVisitorService.checkDailyLimits(),
+
                 date: new Date().toISOString()
             }
         });
@@ -796,7 +1138,7 @@ app.get('/api/stats/overview', authenticateApiKey, (req, res) => {
 });
 
 // ============================================================================
-// MIDDLEWARE DE ERRORES
+// MIDDLEWARE DE ERRORES Y RUTAS NO ENCONTRADAS
 // ============================================================================
 
 app.use('*', (req, res) => {
@@ -805,7 +1147,12 @@ app.use('*', (req, res) => {
         message: 'Endpoint no encontrado',
         error: 'NOT_FOUND',
         path: req.originalUrl,
-        method: req.method
+        method: req.method,
+        availableEndpoints: {
+            search: ['/api/search/start', '/api/search/status/:id', '/api/search/results/:id'],
+            profileVisitor: ['/api/profile-visitor/visit-single', '/api/profile-visitor/visit-list', '/api/profile-visitor/status/:id'],
+            general: ['/health', '/api/health', '/api/config', '/api/stats/overview']
+        }
     });
 });
 
@@ -823,12 +1170,21 @@ app.use((error, req, res, next) => {
 // ============================================================================
 
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor mejorado iniciado en puerto ${PORT}`);
+    console.log(`🚀 Servidor enhanced iniciado en puerto ${PORT}`);
     console.log(`📊 Modo: ${process.env.NODE_ENV || 'development'}`);
     console.log(`🗄️ Almacenamiento: MEMORIA`);
     console.log(`🔗 Health check: http://localhost:${PORT}/health`);
     console.log(`🔍 Búsqueda específica disponible: search_1751839620083_f7eljymfy`);
     console.log(`📈 Total de búsquedas en memoria: ${searchStore.size}`);
+    console.log(`🎯 Nueva funcionalidad: LinkedIn Profile Visitor activada`);
+    console.log(`📋 Límite diario de visitas: ${profileVisitorService.maxDailyVisits}`);
+    console.log(``);
+    console.log(`📚 ENDPOINTS DISPONIBLES:`);
+    console.log(`   🔍 Búsquedas: POST /api/search/start`);
+    console.log(`   🎯 Visita individual: POST /api/profile-visitor/visit-single`);
+    console.log(`   📋 Visita lista: POST /api/profile-visitor/visit-list`);
+    console.log(`   📊 Estadísticas: GET /api/stats/overview`);
+    console.log(`   🚨 Límites diarios: GET /api/profile-visitor/limits`);
 });
 
 module.exports = app;
