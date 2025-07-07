@@ -425,16 +425,30 @@ class PhantombusterService {
             console.log('📋 URLs de búsqueda:', searchUrls);
             console.log('⚙️ Opciones:', options);
 
+            // Configurar argumentos para el agente de LinkedIn Search Export
+            const agentArguments = {
+                searchType: 'keywords',
+                keywords: searchUrls.join(', '),
+                numberOfResultsPerLaunch: options.numberOfResultsPerSearch || 100,
+                numberOfResultsPerSearch: options.numberOfResultsPerSearch || 100,
+                connectionDegreesToScrape: ['2', '3+'],
+                category: 'People',
+                enrichLeadsWithAdditionalInformation: true,
+                // Configuración de LinkedIn (requerida)
+                sessionCookie: process.env.LINKEDIN_SESSION_COOKIE || 'AQEFARABAAAAABansMgAAAGXfFcaJwAAAZgHBAqlTgAAs3VybjpsaTplbnRlcnByaXNlQXV0aFRva2VuOmVKeGpaQUFDcVMybm8wQzA3S1NTOVNCYVhFcGpDeU9JVWNGOHNBSE1pTjZrRXMzQUNBQzJ3UWdmXnVybjpsaTplbnRlcnByaXNlUHJvZmlsZToodXJuOmxpOmVudGVycHJpc2VBY2NvdW50OjQ0ODA1NjE1NCw0OTYxMzczOTEpXnVybjpsaTptZW1iZXI6OTkxOTk2NDExFSWvrC62HmuIt0_WDVb5g4WhXF5LTvr80EuNLOWNNDHfBkz9gnleV4o1e1CbDDg3qlPpQyOOnHrM4HIokY4m3kW9brdTTOK9CqrsUIXsCRTJ-D8C0d74dlAPdAktAqFR-XfPyzdfser4bYQGzeEpTcIGDela_EH1gH54g11U_r3p9xUhMzennJHoRbfk59BCC0ZrOA',
+                userAgent: process.env.LINKEDIN_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
+            };
+
             // Llamada real a la API de Phantombuster
-            const response = await fetch(`${this.baseUrl}/agents/fetch-output?id=${this.agentId}`, {
+            const response = await fetch(`${this.baseUrl}/agents/launch`, {
                 method: 'POST',
                 headers: {
                     'X-Phantombuster-Key': this.apiKey,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    urls: searchUrls,
-                    options: options
+                    id: this.agentId,
+                    argument: JSON.stringify(agentArguments)
                 })
             });
 
