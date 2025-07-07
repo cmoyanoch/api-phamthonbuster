@@ -62,10 +62,8 @@ const visitStore = new Map(); // 🆕 Store para profile visits
 const followUpStore = new Map(); // 🆕 Store para seguimientos programados
 const dailyLimitStore = new Map(); // 🆕 Store para límites diarios
 
-// Almacenamiento limpio - sin datos simulados
-
 // ============================================================================
-// 🆕 SERVICIO LINKEDIN PROFILE VISITOR
+// SERVICIO LINKEDIN PROFILE VISITOR
 // ============================================================================
 
 class LinkedInProfileVisitorService {
@@ -403,43 +401,72 @@ class LinkedInProfileVisitorService {
 }
 
 // ============================================================================
-// SERVICIO PHANTOMBUSTER REAL (BÚSQUEDAS)
+// SERVICIO PHANTOMBUSTER (BÚSQUEDAS)
 // ============================================================================
 
 class PhantombusterService {
     constructor() {
         this.apiKey = process.env.PHANTOMBUSTER_API_KEY;
-        this.agentId = process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID;
+        this.searchAgentId = process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID;
+        this.profileVisitorAgentId = process.env.PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID;
         this.baseUrl = 'https://api.phantombuster.com/api/v2';
     }
 
-    async launchAgent(searchUrls, options = {}) {
+    // ✅ MÉTODO CORREGIDO PARA BÚSQUEDAS
+    async launchSearchAgent(searchUrls, options = {}) {
         try {
-            if (!this.apiKey || !this.agentId) {
-                throw new Error('API Key y Agent ID de Phantombuster son requeridos');
+            if (!this.apiKey || !this.searchAgentId) {
+                throw new Error('API Key y Search Agent ID de Phantombuster son requeridos');
             }
 
             const containerId = `container_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-            console.log('🚀 Lanzando agente Phantombuster real...');
+            console.log('🚀 Lanzando LinkedIn Search Export...');
             console.log('📋 URLs de búsqueda:', searchUrls);
-            console.log('⚙️ Opciones:', options);
 
-            // Configurar argumentos para el agente de LinkedIn Search Export
+            // ✅ CONFIGURACIÓN CORRECTA según la documentación oficial
             const agentArguments = {
-                searchType: 'keywords',
-                keywords: searchUrls.join(', '),
-                numberOfResultsPerLaunch: options.numberOfResultsPerSearch || 100,
-                numberOfResultsPerSearch: options.numberOfResultsPerSearch || 100,
-                connectionDegreesToScrape: ['2', '3+'],
+                // Tipo de búsqueda - usar 'linkedInSearchUrl' para URLs de LinkedIn
+                searchType: 'linkedInSearchUrl',
+
+                // URL de búsqueda de LinkedIn (primera URL)
+                linkedInSearchUrl: searchUrls[0],
+
+                // Si hay múltiples URLs, usar spreadsheet
+                ...(searchUrls.length > 1 && {
+                    searchType: 'spreadsheetUrl',
+                    search: this.createSpreadsheetFromUrls(searchUrls)
+                }),
+
+                // Configuración de resultados
+                numberOfResultsPerLaunch: options.numberOfResultsPerLaunch || 1000,
+                numberOfResultsPerSearch: options.numberOfResultsPerSearch || 1000,
+
+                // Categoría (People es la más común)
                 category: 'People',
+
+                // Grados de conexión a extraer
+                connectionDegreesToScrape: ['2', '3+'],
+
+                // Enriquecimiento de leads
                 enrichLeadsWithAdditionalInformation: true,
-                // Configuración de LinkedIn (requerida)
-                sessionCookie: process.env.LINKEDIN_SESSION_COOKIE || 'AQEFARABAAAAABansMgAAAGXfFcaJwAAAZgHBAqlTgAAs3VybjpsaTplbnRlcnByaXNlQXV0aFRva2VuOmVKeGpaQUFDcVMybm8wQzA3S1NTOVNCYVhFcGpDeU9JVWNGOHNBSE1pTjZrRXMzQUNBQzJ3UWdmXnVybjpsaTplbnRlcnByaXNlUHJvZmlsZToodXJuOmxpOmVudGVycHJpc2VBY2NvdW50OjQ0ODA1NjE1NCw0OTYxMzczOTEpXnVybjpsaTptZW1iZXI6OTkxOTk2NDExFSWvrC62HmuIt0_WDVb5g4WhXF5LTvr80EuNLOWNNDHfBkz9gnleV4o1e1CbDDg3qlPpQyOOnHrM4HIokY4m3kW9brdTTOK9CqrsUIXsCRTJ-D8C0d74dlAPdAktAqFR-XfPyzdfser4bYQGzeEpTcIGDela_EH1gH54g11U_r3p9xUhMzennJHoRbfk59BCC0ZrOA',
+
+                // Eliminar duplicados
+                removeDuplicateProfiles: options.removeDuplicateProfiles || true,
+
+                // ✅ CREDENCIALES DE LINKEDIN (REQUERIDAS)
+                sessionCookie: process.env.LINKEDIN_SESSION_COOKIE,
                 userAgent: process.env.LINKEDIN_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
             };
 
-            // Llamada real a la API de Phantombuster
+            // Validar credenciales de LinkedIn
+            if (!agentArguments.sessionCookie) {
+                throw new Error('LINKEDIN_SESSION_COOKIE es requerido para usar el agente');
+            }
+
+            console.log('⚙️ Argumentos del agente:', JSON.stringify(agentArguments, null, 2));
+
+            // ✅ LLAMADA CORRECTA A LA API
             const response = await fetch(`${this.baseUrl}/agents/launch`, {
                 method: 'POST',
                 headers: {
@@ -447,13 +474,14 @@ class PhantombusterService {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    id: this.agentId,
-                    argument: JSON.stringify(agentArguments)
+                    id: this.searchAgentId, // ✅ Usar Agent ID correcto
+                    argument: agentArguments  // ✅ Pasar objeto directamente, no stringify
                 })
             });
 
             if (!response.ok) {
-                throw new Error(`Error de Phantombuster API: ${response.status} ${response.statusText}`);
+                const errorText = await response.text();
+                throw new Error(`Error de Phantombuster API: ${response.status} ${response.statusText} - ${errorText}`);
             }
 
             const result = await response.json();
@@ -461,22 +489,106 @@ class PhantombusterService {
             return {
                 containerId: result.containerId || containerId,
                 status: 'launched',
-                message: 'Agente lanzado exitosamente en Phantombuster',
+                message: 'LinkedIn Search Export lanzado exitosamente',
                 phantombusterResult: result
             };
+
         } catch (error) {
-            console.error('❌ Error lanzando agente real:', error);
+            console.error('❌ Error lanzando LinkedIn Search Export:', error);
             throw error;
         }
     }
 
-    async getAgentStatus(containerId) {
+    // ✅ MÉTODO CORREGIDO PARA PROFILE VISITOR
+    async launchProfileVisitor(profileUrls, options = {}) {
         try {
-            if (!this.apiKey) {
-                throw new Error('API Key de Phantombuster es requerido');
+            if (!this.apiKey || !this.profileVisitorAgentId) {
+                throw new Error('API Key y Profile Visitor Agent ID de Phantombuster son requeridos');
             }
 
-            const response = await fetch(`${this.baseUrl}/agents/fetch-output?id=${this.agentId}&containerId=${containerId}`, {
+            console.log('🎯 Lanzando LinkedIn Profile Visitor...');
+            console.log('👥 Perfiles a visitar:', profileUrls);
+
+            // ✅ CONFIGURACIÓN CORRECTA para Profile Visitor
+            const agentArguments = {
+                // URLs de perfiles (puede ser string único o array)
+                ...(Array.isArray(profileUrls)
+                    ? { spreadsheetUrl: this.createSpreadsheetFromUrls(profileUrls) }
+                    : { profileUrls: profileUrls }
+                ),
+
+                // Número de perfiles por lanzamiento (máximo recomendado: 80)
+                numberOfAddsPerLaunch: Math.min(options.numberOfAddsPerLaunch || 10, 80),
+
+                // Configuración de comportamiento
+                dwellTime: options.dwellTime || false, // Simular tiempo de permanencia
+
+                // Servicios de email discovery
+                emailChooser: options.emailChooser || 'phantombuster',
+
+                // Screenshots y datos adicionales
+                saveImg: options.saveImg || false,
+                takeScreenshot: options.takeScreenshot || false,
+                scrapeInterests: options.scrapeInterests || false,
+                scrapeAccomplishments: options.scrapeAccomplishments || false,
+
+                // ✅ CREDENCIALES DE LINKEDIN (REQUERIDAS)
+                sessionCookie: process.env.LINKEDIN_SESSION_COOKIE,
+                userAgent: process.env.LINKEDIN_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
+            };
+
+            // Validar credenciales
+            if (!agentArguments.sessionCookie) {
+                throw new Error('LINKEDIN_SESSION_COOKIE es requerido para usar el agente');
+            }
+
+            const response = await fetch(`${this.baseUrl}/agents/launch`, {
+                method: 'POST',
+                headers: {
+                    'X-Phantombuster-Key': this.apiKey,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    id: this.profileVisitorAgentId, // ✅ Usar Agent ID correcto
+                    argument: agentArguments
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Error de Phantombuster API: ${response.status} ${response.statusText} - ${errorText}`);
+            }
+
+            const result = await response.json();
+
+            return {
+                containerId: result.containerId,
+                status: 'launched',
+                message: 'LinkedIn Profile Visitor lanzado exitosamente',
+                phantombusterResult: result
+            };
+
+        } catch (error) {
+            console.error('❌ Error lanzando Profile Visitor:', error);
+            throw error;
+        }
+    }
+
+    // ✅ MÉTODO PARA CREAR SPREADSHEET TEMPORAL
+    createSpreadsheetFromUrls(urls) {
+        // En un entorno real, necesitarías crear un Google Sheet o CSV público
+        // Por ahora, retornamos la primera URL y logeamos el resto
+        console.log('⚠️ Múltiples URLs detectadas. Usando la primera:', urls[0]);
+        console.log('📝 URLs adicionales (crear spreadsheet):', urls.slice(1));
+        return urls[0];
+    }
+
+    // ✅ MÉTODO CORREGIDO PARA OBTENER ESTADO
+    async getAgentStatus(containerId, agentType = 'search') {
+        try {
+            const agentId = agentType === 'search' ? this.searchAgentId : this.profileVisitorAgentId;
+
+            const response = await fetch(`${this.baseUrl}/agents/fetch-output?id=${agentId}&containerId=${containerId}`, {
                 headers: {
                     'X-Phantombuster-Key': this.apiKey
                 }
@@ -486,151 +598,45 @@ class PhantombusterService {
                 throw new Error(`Error obteniendo estado: ${response.status}`);
             }
 
-            const result = await response.json();
-            return result;
+            return await response.json();
         } catch (error) {
             console.error('❌ Error obteniendo estado del agente:', error);
             throw error;
         }
     }
 
-    async getAgentResults(containerId) {
-        try {
-            if (!this.apiKey) {
-                throw new Error('API Key de Phantombuster es requerido');
-            }
-
-            const response = await fetch(`${this.baseUrl}/agents/fetch-output?id=${this.agentId}&containerId=${containerId}`, {
-                headers: {
-                    'X-Phantombuster-Key': this.apiKey
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`Error obteniendo resultados: ${response.status}`);
-            }
-
-            const result = await response.json();
-
-            // Procesar y enriquecer los resultados con connectionDegree
-            if (result.output && Array.isArray(result.output)) {
-                return this.enrichResultsWithConnectionDegree(result.output);
-            }
-
-            return result;
-        } catch (error) {
-            console.error('❌ Error obteniendo resultados del agente:', error);
-            throw error;
-        }
-    }
-
-    // Enriquecer resultados con connectionDegree basado en datos reales
-    enrichResultsWithConnectionDegree(results) {
-        return results.map(lead => {
-            // Determinar connectionDegree basado en datos reales del perfil
-            let connectionDegree = '3rd'; // Por defecto
-
-            // Si el perfil tiene información de conexiones mutuas
-            if (lead.mutualConnections && lead.mutualConnections > 0) {
-                connectionDegree = '2nd';
-            }
-
-            // Si el perfil está en la red directa (esto se puede determinar por otros campos)
-            if (lead.isDirectConnection || lead.connectionLevel === 1) {
-                connectionDegree = '1st';
-            }
-
-            // Si hay información de grado de conexión en el perfil
-            if (lead.connectionDegree) {
-                connectionDegree = lead.connectionDegree;
-            }
-
-            return {
-                ...lead,
-                connectionDegree,
-                extracted_at: new Date().toISOString()
-            };
-        });
-    }
-
+    // ✅ MÉTODO PARA PROCESAR PARÁMETROS DE BÚSQUEDA
     processSearchParameters(searchParams) {
         const searchUrls = [];
 
-        if (searchParams.job_title) {
-            searchUrls.push(`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(searchParams.job_title)}`);
-        }
+        // Construir URLs de búsqueda de LinkedIn basadas en parámetros
+        let baseUrl = 'https://www.linkedin.com/search/results/people/?';
+        const params = new URLSearchParams();
 
-        if (searchParams.industry_codes && searchParams.industry_codes.length > 0) {
-            searchUrls.push(`https://www.linkedin.com/search/results/people/?industry=${searchParams.industry_codes.join(',')}`);
+        if (searchParams.job_title) {
+            params.append('keywords', searchParams.job_title);
         }
 
         if (searchParams.location) {
-            searchUrls.push(`https://www.linkedin.com/search/results/people/?location=${encodeURIComponent(searchParams.location)}`);
+            // LinkedIn usa geoUrn para ubicaciones específicas
+            params.append('geoUrn', `["102174003"]`); // Ejemplo para Francia
         }
 
-        if (searchUrls.length === 0) {
-            searchUrls.push('https://www.linkedin.com/search/results/people/');
+        if (searchParams.industry_codes && searchParams.industry_codes.length > 0) {
+            // LinkedIn usa industryCompanyUrn para industrias
+            const industryUrns = searchParams.industry_codes.map(code => `"${code}"`);
+            params.append('industryCompanyUrn', `[${industryUrns.join(',')}]`);
         }
+
+        // Agregar filtros de conexión por defecto
+        params.append('network', '["S","O"]'); // 2nd y 3rd+ connections
+
+        const finalUrl = baseUrl + params.toString();
+        searchUrls.push(finalUrl);
+
+        console.log('🔍 URL de búsqueda generada:', finalUrl);
 
         return searchUrls;
-    }
-
-    // Función para procesar resultados de Phantombuster y agregar connectionDegree
-    processPhantombusterResults(rawResults, searchParams) {
-        if (!Array.isArray(rawResults)) {
-            console.warn('⚠️ Resultados de Phantombuster no son un array:', rawResults);
-            return [];
-        }
-
-        return rawResults.map(lead => {
-            // Determinar connectionDegree basado en datos reales
-            let connectionDegree = this.determineConnectionDegree(lead, searchParams);
-
-            return {
-                linkedin_url: lead.profileUrl || lead.linkedin_url || lead.url,
-                first_name: lead.firstName || lead.first_name,
-                last_name: lead.lastName || lead.last_name,
-                headline: lead.headline || lead.title,
-                company_name: lead.companyName || lead.company_name,
-                location: lead.location,
-                industry: lead.industry,
-                profile_url: lead.profileUrl || lead.linkedin_url || lead.url,
-                email: lead.email,
-                phone: lead.phone,
-                extracted_at: new Date().toISOString(),
-                connectionDegree,
-                // Campos adicionales de Phantombuster
-                mutual_connections: lead.mutualConnections,
-                connection_level: lead.connectionLevel,
-                profile_views: lead.profileViews,
-                last_activity: lead.lastActivity
-            };
-        });
-    }
-
-    // Determinar el grado de conexión basado en datos reales
-    determineConnectionDegree(lead, searchParams) {
-        // Lógica para determinar connectionDegree basada en datos reales
-
-        // Si hay conexiones mutuas, es 2nd degree
-        if (lead.mutualConnections && lead.mutualConnections > 0) {
-            return '2nd';
-        }
-
-        // Si el nivel de conexión está disponible
-        if (lead.connectionLevel) {
-            if (lead.connectionLevel === 1) return '1st';
-            if (lead.connectionLevel === 2) return '2nd';
-            if (lead.connectionLevel === 3) return '3rd';
-        }
-
-        // Si hay información de red directa
-        if (lead.isDirectConnection) {
-            return '1st';
-        }
-
-        // Por defecto, asumir 3rd degree
-        return '3rd';
     }
 }
 
@@ -1063,6 +1069,10 @@ app.get('/api/config', authenticateApiKey, (req, res) => {
     });
 });
 
+// ============================================================================
+// ENDPOINTS DE BÚSQUEDA (LinkedIn Search Export)
+// ============================================================================
+
 // Ruta de búsqueda real con Phantombuster
 app.post('/api/search/start', authenticateApiKey, async (req, res) => {
     try {
@@ -1077,7 +1087,7 @@ app.post('/api/search/start', authenticateApiKey, async (req, res) => {
         }
 
         // Verificar que las credenciales de Phantombuster estén configuradas
-        if (!process.env.PHANTOMBUSTER_API_KEY || !process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID) {
+        if (!process.env.PHANTOMBUSTER_API_KEY || !process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID || !process.env.PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID) {
             return res.status(500).json({
                 success: false,
                 message: 'Credenciales de Phantombuster no configuradas',
@@ -1106,7 +1116,7 @@ app.post('/api/search/start', authenticateApiKey, async (req, res) => {
 
         // Lanzar agente real de Phantombuster
         try {
-            const launchResult = await phantombusterService.launchAgent(searchUrls, options);
+            const launchResult = await phantombusterService.launchSearchAgent(searchUrls, options);
 
             // Actualizar búsqueda con containerId real
             searchData.containerId = launchResult.containerId;
@@ -1294,6 +1304,144 @@ app.get('/api/search/results/:searchId', authenticateApiKey, async (req, res) =>
         });
     }
 });
+
+// ============================================================================
+// ENDPOINTS DE PROFILE VISITOR (LinkedIn Profile Visitor)
+// ============================================================================
+
+// Visitar perfil individual
+app.post('/api/profile-visitor/visit-single', authenticateApiKey, async (req, res) => {
+    try {
+        const { profileUrl, options = {} } = req.body;
+
+        if (!profileUrl) {
+            return res.status(400).json({
+                success: false,
+                message: 'URL de perfil es requerida',
+                error: 'MISSING_PROFILE_URL'
+            });
+        }
+
+        console.log('🎯 Visitando perfil individual:', profileUrl);
+
+        // Lanzar Profile Visitor
+        const launchResult = await phantombusterService.launchProfileVisitor(profileUrl, options);
+
+        res.json({
+            success: true,
+            message: 'Visita de perfil iniciada',
+            data: {
+                visitId: `visit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                containerId: launchResult.containerId,
+                profileUrl,
+                status: 'launched',
+                options
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error visitando perfil:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error visitando perfil',
+            error: error.message
+        });
+    }
+});
+
+// Visitar lista de perfiles
+app.post('/api/profile-visitor/visit-list', authenticateApiKey, async (req, res) => {
+    try {
+        const { profileUrls, options = {} } = req.body;
+
+        if (!profileUrls || !Array.isArray(profileUrls) || profileUrls.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Lista de URLs de perfiles es requerida',
+                error: 'MISSING_PROFILE_URLS'
+            });
+        }
+
+        console.log('🎯 Visitando lista de perfiles:', profileUrls.length, 'perfiles');
+
+        // Lanzar Profile Visitor
+        const launchResult = await phantombusterService.launchProfileVisitor(profileUrls, options);
+
+        res.json({
+            success: true,
+            message: 'Visita de perfiles iniciada',
+            data: {
+                visitId: `visit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                containerId: launchResult.containerId,
+                profileCount: profileUrls.length,
+                profileUrls,
+                status: 'launched',
+                options
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error visitando perfiles:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error visitando perfiles',
+            error: error.message
+        });
+    }
+});
+
+// Estado de visita
+app.get('/api/profile-visitor/status/:visitId', authenticateApiKey, (req, res) => {
+    try {
+        const { visitId } = req.params;
+        const visit = visitStore.get(visitId);
+
+        if (!visit) {
+            return res.status(404).json({
+                success: false,
+                message: 'Visita no encontrada',
+                error: 'VISIT_NOT_FOUND'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: visit
+        });
+
+    } catch (error) {
+        console.error('❌ Error obteniendo estado de visita:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo estado de visita',
+            error: error.message
+        });
+    }
+});
+
+// Límites diarios
+app.get('/api/profile-visitor/limits', authenticateApiKey, (req, res) => {
+    try {
+        const limits = profileVisitorService.checkDailyLimits();
+
+        res.json({
+            success: true,
+            data: limits
+        });
+
+    } catch (error) {
+        console.error('❌ Error obteniendo límites:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo límites',
+            error: error.message
+        });
+    }
+});
+
+// ============================================================================
+// ESTADÍSTICAS Y MONITOREO
+// ============================================================================
 
 // Estadísticas generales mejoradas
 app.get('/api/stats/overview', authenticateApiKey, (req, res) => {

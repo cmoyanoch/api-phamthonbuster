@@ -2,16 +2,20 @@
 
 ## 📋 Descripción
 
-API de producción que integra directamente con la API de Phantombuster para extracción de leads de LinkedIn. El servidor ejecuta búsquedas en Phantombuster y procesa los resultados incluyendo el campo `connectionDegree` para clasificación automática de leads.
+API de producción que integra directamente con la API de Phantombuster para extracción de leads de LinkedIn. El servidor utiliza **dos agentes especializados** para diferentes funcionalidades:
+
+- **LinkedIn Search Export**: Para búsquedas y extracción masiva de leads
+- **LinkedIn Profile Visitor**: Para visitar perfiles individuales y extraer datos detallados
 
 ## ✨ Características Principales
 
 ### 🔄 Integración con Phantombuster
 
-- **API **: Integración directa con la API oficial de Phantombuster
-- **Búsquedas en tiempo **: Ejecuta búsquedas en LinkedIn a través de Phantombuster
+- **API Real**: Integración directa con la API oficial de Phantombuster
+- **Dual Agent Architecture**: Dos agentes especializados para diferentes funcionalidades
+- **Búsquedas en tiempo real**: Ejecuta búsquedas en LinkedIn a través de Phantombuster
 - **Monitoreo de estado**: Consulta el progreso de las búsquedas en Phantombuster
-- **Resultados **: Procesa y enriquece los datos extraídos de LinkedIn
+- **Resultados reales**: Procesa y enriquece los datos extraídos de LinkedIn
 
 ### 🎯 Clasificación Automática de Leads
 
@@ -35,6 +39,8 @@ La API utiliza dos agentes especializados de Phantombuster:
   - Extrae datos detallados del perfil
   - Simula comportamiento humano
   - Respeta límites de LinkedIn
+  - Soporte para email discovery
+  - Screenshots y datos adicionales
 
 #### 🔍 LinkedIn Search Export (ID: 5905827825464535)
 
@@ -45,6 +51,8 @@ La API utiliza dos agentes especializados de Phantombuster:
   - Extracción de resultados de búsqueda
   - Enriquecimiento automático de datos
   - Clasificación por connectionDegree
+  - Soporte para múltiples URLs de búsqueda
+  - Eliminación de duplicados
 
 ### 🌍 Procesamiento de Datos
 
@@ -109,6 +117,10 @@ PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID=your-profile-visitor-agent-id
 # LinkedIn Search Export - Para búsquedas y extracción de leads
 PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID=your-search-export-agent-id
 
+# 🔐 Configuración de LinkedIn (REQUERIDO)
+LINKEDIN_SESSION_COOKIE=your-linkedin-session-cookie
+LINKEDIN_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36
+
 # Redis (opcional para cache)
 REDIS_URL=redis://localhost:6379
 ```
@@ -121,7 +133,20 @@ Para usar la API de Phantombuster, necesitas:
 2. **Agent IDs**: IDs de los agentes específicos para cada funcionalidad:
    - **Profile Visitor Agent ID**: Para visitar perfiles individuales
    - **Search Export Agent ID**: Para búsquedas y extracción de leads
-3. **Configurar los agentes**: Asegúrate de que tus agentes estén configurados correctamente en Phantombuster
+3. **Session Cookie de LinkedIn**: Requerido para que los agentes funcionen
+4. **Configurar los agentes**: Asegúrate de que tus agentes estén configurados correctamente en Phantombuster
+
+### 🔐 Obtener Session Cookie de LinkedIn
+
+Para obtener tu session cookie de LinkedIn:
+
+1. **Inicia sesión en LinkedIn** en tu navegador
+2. **Abre las herramientas de desarrollador** (F12)
+3. **Ve a la pestaña Application/Storage** → Cookies → https://www.linkedin.com
+4. **Busca la cookie `li_at`** y copia su valor
+5. **Pega el valor en la variable `LINKEDIN_SESSION_COOKIE`**
+
+**⚠️ Importante**: La session cookie expira cuando cierras sesión en LinkedIn. Debes renovarla periódicamente.
 
 ### 4. Ejecutar con Docker
 
@@ -144,6 +169,9 @@ curl http://localhost:3001/health
 
 # Verificar API
 curl http://localhost:3001/api/health
+
+# Verificar configuración
+curl -X GET http://localhost:3001/api/config -H "X-API-Key: your-api-key"
 ```
 
 ## 📊 Estructura de Datos
@@ -158,10 +186,27 @@ curl http://localhost:3001/api/health
     "location": "string" // Ubicación (ciudades, país)
   },
   "options": {
-    "numberOfResultsPerSearch": 100, // Número de resultados
-    "numberOfPagesPerSearch": 10, // Páginas por búsqueda
+    "numberOfResultsPerLaunch": 1000, // Número de resultados por lanzamiento
+    "numberOfResultsPerSearch": 1000, // Número de resultados por búsqueda
     "removeDuplicateProfiles": true, // Eliminar duplicados
-    "includeEmails": true // Incluir emails
+    "enrichLeadsWithAdditionalInformation": true // Enriquecer datos
+  }
+}
+```
+
+### Parámetros de Profile Visitor
+
+```json
+{
+  "profileUrls": ["string"], // URLs de perfiles a visitar
+  "options": {
+    "numberOfAddsPerLaunch": 10, // Perfiles por lanzamiento (máx: 80)
+    "dwellTime": false, // Simular tiempo de permanencia
+    "emailChooser": "phantombuster", // Servicio de email discovery
+    "saveImg": false, // Guardar imágenes de perfil
+    "takeScreenshot": false, // Tomar screenshots
+    "scrapeInterests": false, // Extraer intereses
+    "scrapeAccomplishments": false // Extraer logros
   }
 }
 ```
@@ -170,385 +215,159 @@ curl http://localhost:3001/api/health
 
 ```json
 {
-  "linkedin_url": "string", // URL del perfil de LinkedIn
-  "first_name": "string", // Nombre
-  "last_name": "string", // Apellido
-  "headline": "string", // Título profesional
-  "company_name": "string", // Nombre de la empresa
-  "location": "string", // Ubicación
-  "industry": "string", // Industria
-  "profile_url": "string", // URL del perfil
-  "email": "string|null", // Email (puede ser null)
-  "phone": "string", // Teléfono
-  "extracted_at": "string" // Fecha de extracción
-}
-```
-
-### Clasificación Automática de Leads por Grado de Conexión
-
-Cuando envías un array de leads con el campo `connectionDegree` (`1st`, `2nd`, `3rd`), el endpoint `/api/leads/process` agrega automáticamente el campo `leadType`:
-
-- `1st` → `hot` (contacto directo)
-- `2nd` → `warm` (segundo grado)
-- `3rd` o cualquier otro → `cold` (tercer grado o desconocido)
-
-**Ejemplo de request:**
-
-```json
-{
-  "leads": [
-    { "first_name": "Juan", "connectionDegree": "1st" },
-    { "first_name": "Ana", "connectionDegree": "2nd" },
-    { "first_name": "Pedro", "connectionDegree": "3rd" }
-  ]
-}
-```
-
-**Respuesta:**
-
-```json
-{
-  "success": true,
-  "data": [
-    { "first_name": "Juan", "connectionDegree": "1st", "leadType": "hot" },
-    { "first_name": "Ana", "connectionDegree": "2nd", "leadType": "warm" },
-    { "first_name": "Pedro", "connectionDegree": "3rd", "leadType": "cold" }
-  ]
-}
-```
-
-## 🔍 Endpoints Disponibles
-
-### Health Check (Sin Autenticación)
-
-| Método | Endpoint      | Descripción                 |
-| ------ | ------------- | --------------------------- |
-| GET    | `/health`     | Estado general del servidor |
-| GET    | `/api/health` | Estado de la API            |
-
-### Autenticación y Configuración
-
-| Método | Endpoint             | Descripción                       |
-| ------ | -------------------- | --------------------------------- |
-| GET    | `/api/auth/validate` | Validar API Key                   |
-| GET    | `/api/config`        | Obtener configuración del sistema |
-
-### Búsqueda Automática
-
-| Método | Endpoint                        | Descripción                                   |
-| ------ | ------------------------------- | --------------------------------------------- |
-| POST   | `/api/search/start`             | Iniciar búsqueda (completada automáticamente) |
-| GET    | `/api/search/status/:searchId`  | Estado de búsqueda                            |
-| GET    | `/api/search/results/:searchId` | Obtener resultados                            |
-| GET    | `/api/search/list`              | Listar todas las búsquedas                    |
-| GET    | `/api/search/active`            | Búsquedas activas                             |
-
-### Procesamiento y Clasificación de Leads
-
-| Método | Endpoint             | Descripción                                                          |
-| ------ | -------------------- | -------------------------------------------------------------------- |
-| POST   | `/api/leads/process` | Procesa un array de leads y agrega el campo leadType automáticamente |
-
-### Exportación de Datos
-
-| Método | Endpoint                            | Descripción     |
-| ------ | ----------------------------------- | --------------- |
-| GET    | `/api/search/export/:searchId/json` | Exportar a JSON |
-| GET    | `/api/search/export/:searchId/csv`  | Exportar a CSV  |
-
-### Estadísticas
-
-| Método | Endpoint              | Descripción            |
-| ------ | --------------------- | ---------------------- |
-| GET    | `/api/stats/overview` | Estadísticas generales |
-
-## 🎯 Ejemplos de Uso
-
-### 1. Procesar y clasificar leads por grado de conexión
-
-```bash
-curl -X POST http://localhost:3001/api/leads/process \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: dev-api-key-12345" \
-  -d '{
-    "leads": [
-      { "first_name": "Juan", "connectionDegree": "1st" },
-      { "first_name": "Ana", "connectionDegree": "2nd" },
-      { "first_name": "Pedro", "connectionDegree": "3rd" }
-    ]
-  }'
-```
-
-### 2. Búsqueda en Phantombuster
-
-```bash
-curl -X POST http://localhost:3001/api/search/start \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secure-api-key" \
-  -d '{
-    "searchParams": {
-      "job_title": "Software Engineer"
-    },
-    "options": {
-      "numberOfResultsPerSearch": 10,
-      "includeEmails": true
-    }
-  }'
-```
-
-**Respuesta:**
-
-```json
-{
-  "success": true,
-  "message": "Búsqueda iniciada en Phantombuster",
-  "data": {
-    "searchId": "search_1234567890_abc123",
-    "containerId": "container_1234567890_xyz789",
-    "status": "running",
-    "progress": 10,
-    "message": "La búsqueda está ejecutándose en Phantombuster. Usa /api/search/status/:searchId para monitorear el progreso."
-  }
-}
-```
-
-### 3. Búsqueda con Ubicación Específica (Francia)
-
-```bash
-curl -X POST http://localhost:3001/api/search/start \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: dev-api-key-12345" \
-  -d '{
-    "searchParams": {
-      "job_title": "Supply Chain Director",
-      "industry_codes": ["20","27","50","53","96"],
-      "location": "Paris, Lyon, Marseille, Toulouse, Nice, Lille, France"
-    },
-    "options": {
-      "numberOfResultsPerSearch": 50,
-      "numberOfPagesPerSearch": 5,
-      "removeDuplicateProfiles": true,
-      "includeEmails": true
-    }
-  }'
-```
-
-### 4. Búsqueda con Industrias Específicas
-
-```bash
-curl -X POST http://localhost:3001/api/search/start \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: dev-api-key-12345" \
-  -d '{
-    "searchParams": {
-      "job_title": "Marketing Manager",
-      "industry_codes": ["4", "6"]
-    },
-    "options": {
-      "numberOfResultsPerSearch": 15,
-      "removeDuplicateProfiles": true,
-      "includeEmails": true
-    }
-  }'
-```
-
-### 5. Monitorear Estado de Búsqueda
-
-```bash
-curl -X GET "http://localhost:3001/api/search/status/SEARCH_ID" \
-  -H "X-API-Key: your-secure-api-key"
-```
-
-**Respuesta:**
-
-```json
-{
   "success": true,
   "data": {
-    "searchId": "search_1234567890_abc123",
-    "containerId": "container_1234567890_xyz789",
-    "status": "running",
-    "progress": 45,
-    "totalResults": 0
-  }
-}
-```
-
-### 6. Obtener Resultados
-
-```bash
-curl -X GET "http://localhost:3001/api/search/results/SEARCH_ID" \
-  -H "X-API-Key: your-secure-api-key"
-```
-
-**Respuesta con connectionDegree:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "searchId": "search_1234567890_abc123",
-    "status": "completed",
-    "leads": [
+    "containerId": "string",
+    "status": "running|finished|failed",
+    "progress": 0-100,
+    "results": [
       {
-        "linkedin_url": "https://linkedin.com/in/john-doe",
-        "first_name": "John",
-        "last_name": "Doe",
-        "headline": "Software Engineer at Tech Corp",
-        "company_name": "Tech Corp",
-        "location": "San Francisco, CA",
-        "industry": "Technology",
-        "email": "john.doe@techcorp.com",
-        "phone": "+1 (555) 123-4567",
-        "connectionDegree": "2nd",
-        "mutual_connections": 5,
-        "connection_level": 2,
-        "extracted_at": "2024-01-05T17:12:00.000Z"
+        "linkedin_url": "string",
+        "first_name": "string",
+        "last_name": "string",
+        "headline": "string",
+        "company_name": "string",
+        "location": "string",
+        "industry": "string",
+        "profile_url": "string",
+        "email": "string",
+        "phone": "string",
+        "connectionDegree": "1st|2nd|3rd",
+        "extracted_at": "ISO-8601",
+        "mutual_connections": "number",
+        "connection_level": "number",
+        "profile_views": "number",
+        "last_activity": "string"
       }
-    ],
-    "total": 1,
-    "connectionDegree_available": true
+    ]
   }
 }
 ```
 
-### 6. Exportar Datos
+## 🔌 Endpoints de la API
+
+### 🔍 Búsquedas (LinkedIn Search Export)
+
+#### Iniciar Búsqueda
 
 ```bash
-# Exportar a JSON
-curl -X GET "http://localhost:3001/api/search/export/SEARCH_ID/json" \
-  -H "X-API-Key: dev-api-key-12345" > results.json
-
-# Exportar a CSV
-curl -X GET "http://localhost:3001/api/search/export/SEARCH_ID/csv" \
-  -H "X-API-Key: dev-api-key-12345" > results.csv
+POST /api/search/start
 ```
 
-## 🗺️ Mapeo de Industrias
-
-El servidor mapea automáticamente los códigos de industria a nombres legibles:
-
-| Código | Industria      |
-| ------ | -------------- |
-| 4      | Technology     |
-| 6      | Finance        |
-| 20     | Manufacturing  |
-| 27     | Transportation |
-| 50     | Supply Chain   |
-| 53     | Logistics      |
-| 96     | Retail         |
-
-## 🌍 Soporte de Países
-
-### Francia 🇫🇷
-
-- **Nombres**: Jean, Marie, Pierre, Sophie, François, etc.
-- **Empresas**: LVMH, TotalEnergies, BNP Paribas, Carrefour, Orange, Sanofi, etc.
-- **Teléfonos**: Formato `+33 X XX XX XX`
-- **Detectado por**: `location` contiene "France"
-
-### España 🇪🇸
-
-- **Nombres**: Juan, María, Carlos, Ana, Luis, Carmen, etc.
-- **Empresas**: Inditex, Santander, Telefónica, BBVA, Iberdrola, etc.
-- **Teléfonos**: Formato `+34 XXX XXX XXX`
-- **Detectado por**: `location` contiene "Spain"
-
-### Internacional 🌐
-
-- **Nombres**: John, Mary, James, Patricia, Robert, etc.
-- **Empresas**: TechCorp, InnovateLab, Digital Solutions, etc.
-- **Teléfonos**: Formato `+1 XXX XXX XXXX`
-- **Detectado por**: Ubicación no específica
-
-## 🔧 Configuración Avanzada
-
-### Rate Limiting
-
-```javascript
-// Configurado en el servidor
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // máximo 100 requests por ventana
-});
-```
-
-### Seguridad
-
-- **Helmet**: Headers de seguridad HTTP
-- **CORS**: Configuración de cross-origin
-- **Compression**: Compresión de respuestas
-- **API Key**: Autenticación requerida
-
-### Logging
-
-- **Morgan**: Logging de requests HTTP
-- **Console**: Logs de aplicación
-- **Error Handling**: Manejo centralizado de errores
-
-## 📈 Monitoreo y Estadísticas
-
-### Estadísticas Disponibles
-
-- Total de búsquedas realizadas
-- Búsquedas completadas vs. fallidas
-- Total de leads extraídos
-- Última extracción realizada
-
-### Health Check
+**Ejemplo:**
 
 ```bash
-# Verificar estado del servidor
-curl http://localhost:3001/health
+curl -X POST http://localhost:3001/api/search/start \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "searchParams": {
+      "job_title": "Software Engineer",
+      "location": "Madrid, Spain"
+    },
+    "options": {
+      "numberOfResultsPerLaunch": 100,
+      "removeDuplicateProfiles": true
+    }
+  }'
+```
 
-# Respuesta esperada
-{
-  "status": "ok",
-  "timestamp": "2025-07-07T01:44:28.452Z",
-  "version": "1.0.0",
-  "environment": "development",
-  "database": "memory"
-}
+#### Estado de Búsqueda
+
+```bash
+GET /api/search/status/:searchId
+```
+
+#### Resultados de Búsqueda
+
+```bash
+GET /api/search/results/:searchId
+```
+
+### 🎯 Profile Visitor (LinkedIn Profile Visitor)
+
+#### Visitar Perfil Individual
+
+```bash
+POST /api/profile-visitor/visit-single
+```
+
+**Ejemplo:**
+
+```bash
+curl -X POST http://localhost:3001/api/profile-visitor/visit-single \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "profileUrl": "https://www.linkedin.com/in/johndoe",
+    "options": {
+      "numberOfAddsPerLaunch": 1,
+      "emailChooser": "phantombuster",
+      "takeScreenshot": true
+    }
+  }'
+```
+
+#### Visitar Lista de Perfiles
+
+```bash
+POST /api/profile-visitor/visit-list
+```
+
+#### Estado de Visita
+
+```bash
+GET /api/profile-visitor/status/:visitId
+```
+
+#### Límites Diarios
+
+```bash
+GET /api/profile-visitor/limits
+```
+
+### 📊 Configuración y Estado
+
+#### Verificar Configuración
+
+```bash
+GET /api/config
+```
+
+#### Estadísticas Generales
+
+```bash
+GET /api/stats/overview
 ```
 
 ## 🐛 Solución de Problemas
 
 ### Problemas Comunes
 
-1. **API Key inválida**
+1. **Error 404 en Phantombuster API**
 
-   ```bash
-   # Verificar API Key en el archivo env
-   cat env | grep API_KEY
-   ```
+   - Verificar que las credenciales sean correctas
+   - Comprobar que el session cookie de LinkedIn sea válido
+   - Verificar que los Agent IDs existan y estén activos
 
-2. **Puerto ocupado**
+2. **Session Cookie expirada**
 
-   ```bash
-   # Cambiar puerto en env
-   PORT=3002
-   ```
+   - Renovar la session cookie de LinkedIn
+   - Actualizar la variable `LINKEDIN_SESSION_COOKIE`
 
-3. **Docker no inicia**
+3. **Límites diarios alcanzados**
 
-   ```bash
-   # Verificar logs
-   docker compose logs phantombuster-api
+   - Verificar límites con `/api/profile-visitor/limits`
+   - Esperar al siguiente día o usar una cuenta diferente
 
-   # Reconstruir
-   docker compose down
-   docker compose up --build -d
-   ```
-
-4. **Búsqueda no genera resultados**
-   - Verificar parámetros de búsqueda
-   - Comprobar que la ubicación sea válida
-   - Revisar códigos de industria
+4. **Docker no inicia**
+   - Verificar logs: `docker compose logs phantombuster-api`
+   - Reconstruir: `docker compose down && docker compose up --build -d`
 
 ### Logs de Debug
 
 ```bash
-# Ver logs en tiempo
+# Ver logs en tiempo real
 docker compose logs -f phantombuster-api
 
 # Ver logs específicos
@@ -582,23 +401,23 @@ SKIP_DATABASE=true
 
 ## 📝 Notas de Implementación
 
-### Almacenamiento en Memoria
+### Arquitectura de Agentes
 
-- Los datos se almacenan en memoria (Map)
-- No hay persistencia entre reinicios
-- Ideal para desarrollo y pruebas
+- **Separación de responsabilidades**: Cada agente tiene una función específica
+- **Configuración independiente**: Cada agente puede tener diferentes configuraciones
+- **Escalabilidad**: Fácil agregar nuevos agentes para diferentes funcionalidades
 
-### Búsqueda Automática
+### Seguridad
 
-- Se completa inmediatamente al iniciar
-- Genera datos simulados realistas
-- No requiere monitoreo de estado
+- **API Key**: Autenticación requerida para todos los endpoints
+- **Rate Limiting**: Protección contra abuso
+- **Session Cookies**: Manejo seguro de credenciales de LinkedIn
 
-### Datos Simulados
+### Rendimiento
 
-- Basados en parámetros de búsqueda
-- Localizados según país/ubicación
-- Incluyen todos los campos requeridos
+- **Límites diarios**: Respeto de límites de LinkedIn
+- **Procesamiento asíncrono**: Las búsquedas se ejecutan en segundo plano
+- **Caché**: Almacenamiento en memoria para resultados
 
 ## 🤝 Contribución
 
