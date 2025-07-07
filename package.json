@@ -15,7 +15,7 @@
     "leads",
     "extraction"
   ],
-  "author": "Cristian",
+  "author": "Cristian Moyano",
   "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",
