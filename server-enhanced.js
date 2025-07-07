@@ -71,7 +71,7 @@ const dailyLimitStore = new Map(); // 🆕 Store para límites diarios
 class LinkedInProfileVisitorService {
     constructor() {
         this.apiKey = process.env.PHANTOMBUSTER_API_KEY;
-        this.agentId = process.env.PHANTOMBUSTER_AGENT_ID;
+        this.agentId = process.env.PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID;
         this.baseUrl = 'https://api.phantombuster.com/api/v2';
         this.maxDailyVisits = 80; // Límite seguro de LinkedIn
     }
@@ -409,7 +409,7 @@ class LinkedInProfileVisitorService {
 class PhantombusterService {
     constructor() {
         this.apiKey = process.env.PHANTOMBUSTER_API_KEY;
-        this.agentId = process.env.PHANTOMBUSTER_AGENT_ID;
+        this.agentId = process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID;
         this.baseUrl = 'https://api.phantombuster.com/api/v2';
     }
 
@@ -1029,7 +1029,8 @@ app.get('/api/config', authenticateApiKey, (req, res) => {
         success: true,
         data: {
             phantombuster_api_key: process.env.PHANTOMBUSTER_API_KEY ? '✅ configurado' : '❌ no configurado',
-            phantombuster_agent_id: process.env.PHANTOMBUSTER_AGENT_ID ? '✅ configurado' : '❌ no configurado',
+            phantombuster_profile_visitor_agent_id: process.env.PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID ? '✅ configurado' : '❌ no configurado',
+            phantombuster_search_export_agent_id: process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID ? '✅ configurado' : '❌ no configurado',
             environment: process.env.NODE_ENV || 'development',
             database: 'memory',
             mode: 'REAL_PHANTOMBUSTER_API',
@@ -1041,7 +1042,8 @@ app.get('/api/config', authenticateApiKey, (req, res) => {
                 'real_phantombuster_integration',
                 'connection_degree_mapping',
                 'linkedin_profile_visitor',
-                'lead_classification'
+                'lead_classification',
+                'dual_agent_support'
             ]
         }
     });
@@ -1061,7 +1063,7 @@ app.post('/api/search/start', authenticateApiKey, async (req, res) => {
         }
 
         // Verificar que las credenciales de Phantombuster estén configuradas
-        if (!process.env.PHANTOMBUSTER_API_KEY || !process.env.PHANTOMBUSTER_AGENT_ID) {
+        if (!process.env.PHANTOMBUSTER_API_KEY || !process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID) {
             return res.status(500).json({
                 success: false,
                 message: 'Credenciales de Phantombuster no configuradas',
@@ -1369,7 +1371,8 @@ app.listen(PORT, () => {
     console.log(`🎯 LinkedIn Profile Visitor activada`);
     console.log(`📋 Límite diario de visitas: ${profileVisitorService.maxDailyVisits}`);
     console.log(`🔑 Phantombuster API Key: ${process.env.PHANTOMBUSTER_API_KEY ? '✅ Configurada' : '❌ No configurada'}`);
-    console.log(`🤖 Phantombuster Agent ID: ${process.env.PHANTOMBUSTER_AGENT_ID ? '✅ Configurado' : '❌ No configurado'}`);
+    console.log(`🎯 Profile Visitor Agent ID: ${process.env.PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID ? '✅ Configurado' : '❌ No configurado'}`);
+    console.log(`🔍 Search Export Agent ID: ${process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID ? '✅ Configurado' : '❌ No configurado'}`);
     console.log(``);
     console.log(`📚 ENDPOINTS DISPONIBLES:`);
     console.log(`   🔍 Búsquedas REALES: POST /api/search/start`);

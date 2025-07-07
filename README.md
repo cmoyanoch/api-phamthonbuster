@@ -1,31 +1,55 @@
-# 🚀 API Phantombuster Real - Servidor de Producción
+# 🚀 API Phantombuster - Servidor de Producción
 
 ## 📋 Descripción
 
-API de producción que integra directamente con la API real de Phantombuster para extracción de leads de LinkedIn. El servidor ejecuta búsquedas reales en Phantombuster y procesa los resultados incluyendo el campo `connectionDegree` para clasificación automática de leads.
+API de producción que integra directamente con la API de Phantombuster para extracción de leads de LinkedIn. El servidor ejecuta búsquedas en Phantombuster y procesa los resultados incluyendo el campo `connectionDegree` para clasificación automática de leads.
 
 ## ✨ Características Principales
 
-### 🔄 Integración Real con Phantombuster
+### 🔄 Integración con Phantombuster
 
-- **API Real**: Integración directa con la API oficial de Phantombuster
-- **Búsquedas en tiempo real**: Ejecuta búsquedas reales en LinkedIn a través de Phantombuster
-- **Monitoreo de estado**: Consulta el progreso real de las búsquedas en Phantombuster
-- **Resultados reales**: Procesa y enriquece los datos reales extraídos de LinkedIn
+- **API **: Integración directa con la API oficial de Phantombuster
+- **Búsquedas en tiempo **: Ejecuta búsquedas en LinkedIn a través de Phantombuster
+- **Monitoreo de estado**: Consulta el progreso de las búsquedas en Phantombuster
+- **Resultados **: Procesa y enriquece los datos extraídos de LinkedIn
 
 ### 🎯 Clasificación Automática de Leads
 
-- **connectionDegree**: Campo automático basado en datos reales de LinkedIn
+- **connectionDegree**: Campo automático basado en datos de LinkedIn
 - **Mapeo inteligente**: Determina el grado de conexión (`1st`, `2nd`, `3rd`) basado en:
   - Conexiones mutuas
   - Nivel de conexión en LinkedIn
   - Información de red directa
 - **Clasificación por tipo**: Mapea automáticamente a tipos de lead (`hot`, `warm`, `cold`)
 
-### 🌍 Procesamiento de Datos Reales
+### 🤖 Agentes de Phantombuster
 
-- **Datos reales de LinkedIn**: Nombres, empresas, ubicaciones reales
-- **Información de conexiones**: Datos reales de la red de LinkedIn
+La API utiliza dos agentes especializados de Phantombuster:
+
+#### 🎯 LinkedIn Profile Visitor (ID: 4413202499115443)
+
+- **Función**: Visitar perfiles individuales de LinkedIn
+- **Endpoints**: `/api/profile-visitor/*`
+- **Características**:
+  - Visita perfiles específicos
+  - Extrae datos detallados del perfil
+  - Simula comportamiento humano
+  - Respeta límites de LinkedIn
+
+#### 🔍 LinkedIn Search Export (ID: 5905827825464535)
+
+- **Función**: Búsquedas y extracción masiva de leads
+- **Endpoints**: `/api/search/*`
+- **Características**:
+  - Búsquedas por criterios (título, ubicación, industria)
+  - Extracción de resultados de búsqueda
+  - Enriquecimiento automático de datos
+  - Clasificación por connectionDegree
+
+### 🌍 Procesamiento de Datos
+
+- **Datos de LinkedIn**: Nombres, empresas, ubicaciones
+- **Información de conexiones**: Datos de la red de LinkedIn
 - **Enriquecimiento automático**: Agrega campos adicionales como `connectionDegree`
 - **Validación de datos**: Procesa y valida los datos recibidos de Phantombuster
 
@@ -77,7 +101,13 @@ API_KEY=your-secure-api-key
 
 # Phantombuster API (REQUERIDO para producción)
 PHANTOMBUSTER_API_KEY=your-phantombuster-api-key
-PHANTOMBUSTER_AGENT_ID=your-phantombuster-agent-id
+
+# 🎯 Agentes de Phantombuster
+# LinkedIn Profile Visitor - Para visitar perfiles individuales
+PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID=your-profile-visitor-agent-id
+
+# LinkedIn Search Export - Para búsquedas y extracción de leads
+PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID=your-search-export-agent-id
 
 # Redis (opcional para cache)
 REDIS_URL=redis://localhost:6379
@@ -85,11 +115,13 @@ REDIS_URL=redis://localhost:6379
 
 ### ⚠️ Configuración de Phantombuster
 
-Para usar la API real de Phantombuster, necesitas:
+Para usar la API de Phantombuster, necesitas:
 
 1. **API Key de Phantombuster**: Obtén tu API key desde el panel de Phantombuster
-2. **Agent ID**: ID del agente de LinkedIn que quieres usar para las búsquedas
-3. **Configurar el agente**: Asegúrate de que tu agente esté configurado correctamente en Phantombuster
+2. **Agent IDs**: IDs de los agentes específicos para cada funcionalidad:
+   - **Profile Visitor Agent ID**: Para visitar perfiles individuales
+   - **Search Export Agent ID**: Para búsquedas y extracción de leads
+3. **Configurar los agentes**: Asegúrate de que tus agentes estén configurados correctamente en Phantombuster
 
 ### 4. Ejecutar con Docker
 
@@ -247,7 +279,7 @@ curl -X POST http://localhost:3001/api/leads/process \
   }'
 ```
 
-### 2. Búsqueda Real en Phantombuster
+### 2. Búsqueda en Phantombuster
 
 ```bash
 curl -X POST http://localhost:3001/api/search/start \
@@ -342,7 +374,7 @@ curl -X GET "http://localhost:3001/api/search/status/SEARCH_ID" \
 }
 ```
 
-### 6. Obtener Resultados Reales
+### 6. Obtener Resultados
 
 ```bash
 curl -X GET "http://localhost:3001/api/search/results/SEARCH_ID" \
@@ -516,7 +548,7 @@ curl http://localhost:3001/health
 ### Logs de Debug
 
 ```bash
-# Ver logs en tiempo real
+# Ver logs en tiempo
 docker compose logs -f phantombuster-api
 
 # Ver logs específicos
