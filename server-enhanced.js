@@ -1188,3 +1188,28 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
+
+function getLeadTypeFromDegree(degree) {
+    if (degree === '1st') return 'hot';
+    if (degree === '2nd') return 'warm';
+    return 'cold';
+}
+
+app.post('/api/leads/process', authenticateApiKey, (req, res) => {
+    try {
+        const leads = req.body.leads;
+        if (!Array.isArray(leads)) {
+            return res.status(400).json({ success: false, message: 'Leads debe ser un array' });
+        }
+
+        const leadsWithType = leads.map(lead => ({
+            ...lead,
+            leadType: getLeadTypeFromDegree(lead.connectionDegree)
+        }));
+
+        // Aquí puedes guardar, procesar o devolver los leads enriquecidos
+        res.json({ success: true, data: leadsWithType });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
