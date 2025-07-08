@@ -619,7 +619,7 @@ class PhantombusterService {
 
         if (searchParams.location) {
             // LinkedIn usa geoUrn para ubicaciones específicas
-            params.append('geoUrn', `["102174003"]`); // Ejemplo para Francia
+            params.append('geoUrn', `searchParams.location`); // Ejemplo para Francia
         }
 
         if (searchParams.industry_codes && searchParams.industry_codes.length > 0) {
@@ -1837,6 +1837,305 @@ app.get('/api/search/container/:containerId', authenticateApiKey, async (req, re
         res.status(500).json({
             success: false,
             message: 'Error obteniendo información del container',
+            error: error.message
+        });
+    }
+});
+
+// Endpoint para descargar resultados de Phantombuster automáticamente
+app.get('/api/search/download/:containerId', authenticateApiKey, async (req, res) => {
+    try {
+        const { containerId } = req.params;
+        const { format = 'json' } = req.query; // json o csv
+
+        // Primero obtener información del container
+        const containerResponse = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch-output?id=${process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID}&containerId=${containerId}`, {
+            headers: {
+                'X-Phantombuster-Key': process.env.PHANTOMBUSTER_API_KEY
+            }
+        });
+
+        const containerData = await containerResponse.json();
+
+        if (containerData.status !== 'finished') {
+            return res.status(400).json({
+                success: false,
+                message: 'La búsqueda aún no está completada',
+                error: 'SEARCH_NOT_COMPLETED',
+                data: {
+                    status: containerData.status,
+                    progress: containerData.progress || 0
+                }
+            });
+        }
+
+        // Extraer URLs de descarga del output
+        const outputLines = containerData.output ? containerData.output.split('\r\n') : [];
+        const csvUrl = outputLines.find(line => line.includes('CSV saved at'))?.split('CSV saved at ')?.[1];
+        const jsonUrl = outputLines.find(line => line.includes('JSON saved at'))?.split('JSON saved at ')?.[1];
+
+        if (!csvUrl && !jsonUrl) {
+            return res.status(404).json({
+                success: false,
+                message: 'No se encontraron URLs de descarga en el output',
+                error: 'DOWNLOAD_URLS_NOT_FOUND'
+            });
+        }
+
+        // Determinar URL a descargar
+        const downloadUrl = format === 'csv' ? csvUrl : jsonUrl;
+
+        if (!downloadUrl) {
+            return res.status(400).json({
+                success: false,
+                message: `Formato ${format} no disponible`,
+                error: 'FORMAT_NOT_AVAILABLE',
+                availableFormats: {
+                    csv: !!csvUrl,
+                    json: !!jsonUrl
+                }
+            });
+        }
+
+        // Descargar el archivo
+        const fileResponse = await fetch(downloadUrl);
+
+        if (!fileResponse.ok) {
+            return res.status(500).json({
+                success: false,
+                message: 'Error descargando archivo desde Phantombuster',
+                error: 'DOWNLOAD_FAILED'
+            });
+        }
+
+        const fileContent = await fileResponse.text();
+        const fileName = `phantombuster_results_${containerId}.${format}`;
+
+        // Configurar headers para descarga
+        res.setHeader('Content-Type', format === 'csv' ? 'text/csv' : 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+
+        res.json({
+            success: true,
+            message: 'Archivo descargado exitosamente',
+            data: {
+                containerId,
+                format,
+                fileName,
+                downloadUrl,
+                fileSize: fileContent.length,
+                content: format === 'json' ? JSON.parse(fileContent) : fileContent
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error descargando resultados:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error descargando resultados',
+            error: error.message
+        });
+    }
+});
+
+// Endpoint para listar containers disponibles para descarga
+app.get('/api/search/downloadable-containers', authenticateApiKey, async (req, res) => {
+    try {
+        // Obtener información del agente
+        const agentResponse = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch?id=${process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID}`, {
+            headers: {
+                'X-Phantombuster-Key': process.env.PHANTOMBUSTER_API_KEY
+            }
+        });
+
+        const agentData = await agentResponse.json();
+
+        // Nota: Phantombuster no proporciona un endpoint para listar todos los containers
+        // Este endpoint te da información del agente y su última ejecución
+        res.json({
+            success: true,
+            data: {
+                agent: {
+                    id: agentData.id,
+                    name: agentData.name,
+                    status: agentData.status,
+                    lastLaunch: agentData.lastLaunch,
+                    lastLaunchAt: agentData.lastLaunchAt
+                },
+                message: "Para obtener la lista completa de containers, consulta el panel de Phantombuster",
+                note: "Usa /api/search/container/{containerId} para verificar si un container tiene resultados descargables"
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error obteniendo containers descargables:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo containers descargables',
+            error: error.message
+        });
+    }
+});
+
+// Endpoint para listar containers recientes (últimas ejecuciones)
+app.get('/api/search/recent-containers', authenticateApiKey, async (req, res) => {
+    try {
+        const { limit = 10 } = req.query;
+
+        // Lista de containers conocidos (puedes actualizar esta lista)
+        const knownContainers = [
+            '8801625705231996', // Tender Manager France
+            '4039021432717631', // Public Tender Manager
+            '3835833896164009', // Software Engineer Madrid
+            '2450092397226749'  // Supply Chain Director
+        ];
+
+        const containersInfo = [];
+
+        // Verificar cada container conocido
+        for (const containerId of knownContainers.slice(0, parseInt(limit))) {
+            try {
+                const response = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch-output?id=${process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID}&containerId=${containerId}`, {
+                    headers: {
+                        'X-Phantombuster-Key': process.env.PHANTOMBUSTER_API_KEY
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.containerId) {
+                    // Extraer información del output
+                    const outputLines = data.output ? data.output.split('\r\n') : [];
+                    const keywords = outputLines.find(line => line.includes('Input:'))?.replace('[info_]ℹ️ Input:', '').trim();
+                    const totalResults = outputLines.find(line => line.includes('Total results count:'))?.match(/\d+/)?.[0];
+                    const resultsFound = outputLines.find(line => line.includes('Got') && line.includes('profiles'))?.match(/\d+/)?.[0];
+                    const hasCsv = outputLines.some(line => line.includes('CSV saved at'));
+                    const hasJson = outputLines.some(line => line.includes('JSON saved at'));
+
+                    containersInfo.push({
+                        containerId: data.containerId,
+                        status: data.status,
+                        keywords: keywords || 'N/A',
+                        totalResults: totalResults || 0,
+                        resultsFound: resultsFound || 0,
+                        hasDownloads: hasCsv || hasJson,
+                        availableFormats: {
+                            csv: hasCsv,
+                            json: hasJson
+                        },
+                        startedAt: data.mostRecentEndedAt ? new Date(data.mostRecentEndedAt).toISOString() : null,
+                        isRunning: data.isAgentRunning || false
+                    });
+                }
+            } catch (error) {
+                console.log(`Container ${containerId} no encontrado o error:`, error.message);
+            }
+        }
+
+        // Ordenar por fecha (más recientes primero)
+        containersInfo.sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+
+        res.json({
+            success: true,
+            data: {
+                containers: containersInfo,
+                total: containersInfo.length,
+                message: "Containers recientes encontrados. Usa el containerId para descargar resultados.",
+                note: "Para ver todos los containers, consulta el panel de Phantombuster"
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error obteniendo containers recientes:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo containers recientes',
+            error: error.message
+        });
+    }
+});
+
+// Endpoint para buscar containers por keywords
+app.get('/api/search/search-containers', authenticateApiKey, async (req, res) => {
+    try {
+        const { keywords } = req.query;
+
+        if (!keywords) {
+            return res.status(400).json({
+                success: false,
+                message: 'Parámetro keywords es requerido',
+                error: 'MISSING_KEYWORDS'
+            });
+        }
+
+        // Lista de containers conocidos
+        const knownContainers = [
+            '8801625705231996',
+            '4039021432717631',
+            '3835833896164009',
+            '2450092397226749'
+        ];
+
+        const matchingContainers = [];
+
+        // Buscar containers que coincidan con las keywords
+        for (const containerId of knownContainers) {
+            try {
+                const response = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch-output?id=${process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID}&containerId=${containerId}`, {
+                    headers: {
+                        'X-Phantombuster-Key': process.env.PHANTOMBUSTER_API_KEY
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.containerId && data.output) {
+                    const outputLines = data.output.split('\r\n');
+                    const containerKeywords = outputLines.find(line => line.includes('Input:'))?.replace('[info_]ℹ️ Input:', '').trim();
+
+                    if (containerKeywords && containerKeywords.toLowerCase().includes(keywords.toLowerCase())) {
+                        const totalResults = outputLines.find(line => line.includes('Total results count:'))?.match(/\d+/)?.[0];
+                        const resultsFound = outputLines.find(line => line.includes('Got') && line.includes('profiles'))?.match(/\d+/)?.[0];
+                        const hasCsv = outputLines.some(line => line.includes('CSV saved at'));
+                        const hasJson = outputLines.some(line => line.includes('JSON saved at'));
+
+                        matchingContainers.push({
+                            containerId: data.containerId,
+                            status: data.status,
+                            keywords: containerKeywords,
+                            totalResults: totalResults || 0,
+                            resultsFound: resultsFound || 0,
+                            hasDownloads: hasCsv || hasJson,
+                            availableFormats: {
+                                csv: hasCsv,
+                                json: hasJson
+                            },
+                            startedAt: data.mostRecentEndedAt ? new Date(data.mostRecentEndedAt).toISOString() : null
+                        });
+                    }
+                }
+            } catch (error) {
+                // Ignorar errores de containers no encontrados
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                searchTerm: keywords,
+                containers: matchingContainers,
+                total: matchingContainers.length,
+                message: matchingContainers.length > 0
+                    ? `Encontrados ${matchingContainers.length} containers con "${keywords}"`
+                    : `No se encontraron containers con "${keywords}"`
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error buscando containers:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error buscando containers',
             error: error.message
         });
     }
