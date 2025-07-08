@@ -638,6 +638,126 @@ class PhantombusterService {
 
         return searchUrls;
     }
+
+    // ✅ MÉTODO PARA OBTENER RESULTADOS DE PHANTOMBUSTER
+    async getAgentResults(containerId) {
+        try {
+            const response = await fetch(`${this.baseUrl}/agents/fetch-output?id=${this.searchAgentId}&containerId=${containerId}`, {
+                headers: {
+                    'X-Phantombuster-Key': this.apiKey
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Error obteniendo resultados: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // Extraer URLs de descarga del output
+            const outputLines = data.output ? data.output.split('\r\n') : [];
+            const csvUrl = outputLines.find(line => line.includes('CSV saved at'))?.split('CSV saved at ')?.[1];
+            const jsonUrl = outputLines.find(line => line.includes('JSON saved at'))?.split('JSON saved at ')?.[1];
+
+            // Intentar descargar resultados JSON (preferido)
+            if (jsonUrl) {
+                const fileResponse = await fetch(jsonUrl);
+                if (fileResponse.ok) {
+                    return await fileResponse.json();
+                }
+            }
+
+            // Fallback a CSV si JSON no está disponible
+            if (csvUrl) {
+                const fileResponse = await fetch(csvUrl);
+                if (fileResponse.ok) {
+                    const csvText = await fileResponse.text();
+                    return this.parseCSVToJSON(csvText);
+                }
+            }
+
+            throw new Error('No se encontraron archivos de resultados descargables');
+
+        } catch (error) {
+            console.error('❌ Error obteniendo resultados del agente:', error);
+            throw error;
+        }
+    }
+
+    // ✅ MÉTODO PARA PROCESAR RESULTADOS DE PHANTOMBUSTER
+    processPhantombusterResults(rawResults, searchParams) {
+        try {
+            if (!Array.isArray(rawResults)) {
+                console.warn('⚠️ Resultados no son un array:', typeof rawResults);
+                return [];
+            }
+
+            return rawResults.map(result => ({
+                profileUrl: result.profileUrl || result.linkedInUrl || result.url,
+                name: result.name || result.fullName || 'N/A',
+                title: result.title || result.jobTitle || 'N/A',
+                company: result.company || result.currentCompany || 'N/A',
+                location: result.location || result.geographicArea || 'N/A',
+                industry: result.industry || 'N/A',
+                connectionDegree: this.mapConnectionDegree(result.connectionDegree || result.degree),
+                email: result.email || null,
+                phone: result.phone || null,
+                linkedInId: result.linkedInId || null,
+                profilePicture: result.profilePicture || null,
+                summary: result.summary || null,
+                experience: result.experience || [],
+                education: result.education || [],
+                skills: result.skills || [],
+                extractedAt: new Date().toISOString(),
+                searchParams: searchParams
+            }));
+
+        } catch (error) {
+            console.error('❌ Error procesando resultados de Phantombuster:', error);
+            return [];
+        }
+    }
+
+    // ✅ MÉTODO PARA MAPEAR GRADOS DE CONEXIÓN
+    mapConnectionDegree(degree) {
+        const mapping = {
+            '1': '1st',
+            '2': '2nd',
+            '3': '3rd+',
+            '1st': '1st',
+            '2nd': '2nd',
+            '3rd': '3rd+',
+            '3+': '3rd+'
+        };
+        return mapping[degree] || '3rd+';
+    }
+
+    // ✅ MÉTODO PARA PARSEAR CSV A JSON
+    parseCSVToJSON(csvText) {
+        try {
+            const lines = csvText.split('\n');
+            const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+            const results = [];
+
+            for (let i = 1; i < lines.length; i++) {
+                if (lines[i].trim()) {
+                    const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+                    const row = {};
+
+                    headers.forEach((header, index) => {
+                        row[header] = values[index] || '';
+                    });
+
+                    results.push(row);
+                }
+            }
+
+            return results;
+        } catch (error) {
+            console.error('❌ Error parseando CSV:', error);
+            return [];
+        }
+    }
 }
 
 // ============================================================================
