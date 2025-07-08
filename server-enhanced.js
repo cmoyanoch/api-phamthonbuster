@@ -1346,6 +1346,87 @@ app.get('/api/search/status/:searchId', authenticateApiKey, async (req, res) => 
     }
 });
 
+// ✅ ENDPOINT: Obtener resultados directamente por containerId (MÁS ESPECÍFICO PRIMERO)
+app.get('/api/search/results/container/:containerId', authenticateApiKey, async (req, res) => {
+    try {
+        const { containerId } = req.params;
+        const { limit, offset, format = 'json' } = req.query;
+
+        console.log(`🔍 Obteniendo resultados para containerId: ${containerId}`);
+
+        // Verificar estado del container en Phantombuster
+        const containerStatus = await phantombusterService.getAgentStatus(containerId);
+
+        if (containerStatus.status !== 'finished') {
+            return res.status(400).json({
+                success: false,
+                message: 'El container aún no está completado',
+                error: 'CONTAINER_NOT_COMPLETED',
+                data: {
+                    containerId,
+                    status: containerStatus.status,
+                    progress: containerStatus.progress || 0,
+                    isRunning: containerStatus.isAgentRunning || false,
+                    message: 'El container está ejecutándose en Phantombuster. Espera a que termine.'
+                }
+            });
+        }
+
+        // Obtener resultados reales de Phantombuster
+        const realResults = await phantombusterService.getAgentResults(containerId);
+
+        // Procesar resultados
+        const processedResults = phantombusterService.processPhantombusterResults(realResults, {});
+
+        // Aplicar paginación
+        let results = processedResults;
+        if (limit) {
+            const limitNum = parseInt(limit);
+            const offsetNum = parseInt(offset) || 0;
+            results = processedResults.slice(offsetNum, offsetNum + limitNum);
+        }
+
+        // Extraer información del output para metadatos
+        const outputLines = containerStatus.output ? containerStatus.output.split('\r\n') : [];
+        const keywords = outputLines.find(line => line.includes('Input:'))?.replace('[info_]ℹ️ Input:', '').trim();
+        const totalResults = outputLines.find(line => line.includes('Total results count:'))?.match(/\d+/)?.[0];
+        const resultsFound = outputLines.find(line => line.includes('Got') && line.includes('profiles'))?.match(/\d+/)?.[0];
+
+        res.json({
+            success: true,
+            data: {
+                containerId,
+                status: 'completed',
+                leads: results,
+                total: processedResults.length,
+                returned: results.length,
+                extracted_at: new Date().toISOString(),
+                connectionDegree_available: results.length > 0 ? results[0].hasOwnProperty('connectionDegree') : false,
+                metadata: {
+                    keywords: keywords || 'N/A',
+                    totalResultsRequested: totalResults || 0,
+                    resultsFound: resultsFound || 0,
+                    outputLines: outputLines.length
+                },
+                pagination: {
+                    limit: limit ? parseInt(limit) : null,
+                    offset: offset ? parseInt(offset) : 0,
+                    hasMore: limit ? (parseInt(offset) + parseInt(limit)) < processedResults.length : false
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error obteniendo resultados por containerId:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo resultados del container',
+            error: error.message
+        });
+    }
+});
+
+// ✅ ENDPOINT: Obtener resultados por searchId (MÁS GENÉRICO DESPUÉS)
 app.get('/api/search/results/:searchId', authenticateApiKey, async (req, res) => {
     try {
         const { searchId } = req.params;
@@ -2273,7 +2354,7 @@ app.use('*', (req, res) => {
         path: req.originalUrl,
         method: req.method,
         availableEndpoints: {
-            search: ['/api/search/start', '/api/search/status/:id', '/api/search/results/:id'],
+            search: ['/api/search/start', '/api/search/status/:id', '/api/search/results/:id', '/api/search/results/container/:containerId'],
             profileVisitor: ['/api/profile-visitor/visit-single', '/api/profile-visitor/visit-list', '/api/profile-visitor/status/:id'],
             general: ['/health', '/api/health', '/api/config', '/api/stats/overview']
         }
@@ -2309,7 +2390,8 @@ app.listen(PORT, () => {
     console.log(`📚 ENDPOINTS DISPONIBLES:`);
     console.log(`   🔍 Búsquedas REALES: POST /api/search/start`);
     console.log(`   📊 Estado de búsqueda: GET /api/search/status/:searchId`);
-    console.log(`   📋 Resultados reales: GET /api/search/results/:searchId`);
+    console.log(`   📋 Resultados por searchId: GET /api/search/results/:searchId`);
+    console.log(`   📋 Resultados por containerId: GET /api/search/results/container/:containerId`);
     console.log(`   🎯 Visita individual: POST /api/profile-visitor/visit-single`);
     console.log(`   📋 Visita lista: POST /api/profile-visitor/visit-list`);
     console.log(`   📊 Estadísticas: GET /api/stats/overview`);
@@ -2317,8 +2399,6 @@ app.listen(PORT, () => {
     console.log(``);
     console.log(`⚠️  IMPORTANTE: Configura PHANTOMBUSTER_API_KEY y PHANTOMBUSTER_AGENT_ID en el archivo .env`);
 });
-
-module.exports = app;
 
 function getLeadTypeFromDegree(degree) {
     if (degree === '1st') return 'hot';
@@ -2344,3 +2424,5 @@ app.post('/api/leads/process', authenticateApiKey, (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 });
+
+module.exports = app;

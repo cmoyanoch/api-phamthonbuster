@@ -25,13 +25,13 @@ Crea un archivo `.env` en la raíz del proyecto:
 
 ```env
 # Phantombuster API Configuration
-PHANTOMBUSTER_API_KEY=r2KioJAihnsDpNPOxl3Yn5XXxPXvvA1hhXSpC4VgQGQ
-PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID=5905827825464535
-PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID=4413202499115443
+PHANTOMBUSTER_API_KEY=xxxx
+PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID=xxxx
+PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID=xxxx
 
 # LinkedIn Session Configuration
-LINKEDIN_SESSION_COOKIE=AQEFARABAAAAABansMgAAAGXfFcaJwAAAZgHBAqlTgAAs3VybjpsaTplbnRlcnByaXNlQXV0aFRva2VuOmVKeGpaQUFDcVMybm8wQzA3S1NTOVNCYVhFcGpDeU9JVWNGOHNBSE1pTjZrRXMzQUNBQzJ3UWdmXnVybjpsaTplbnRlcnByaXNlUHJvZmlsZToodXJuOmxpOmVudGVycHJpc2VBY2NvdW50OjQ0ODA1NjE1NCw0OTYxMzczOTEpXnVybjpsaTptZW1iZXI6OTkxOTk2NDExFSWvrC62HmuIt0_WDVb5g4WhXF5LTvr80EuNLOWNNDHfBkz9gnleV4o1e1CbDDg3qlPpQyOOnHrM4HIokY4m3kW9brdTTOK9CqrsUIXsCRTJ-D8C0d74dlAPdAktAqFR-XfPyzdfser4bYQGzeEpTcIGDela_EH1gH54g11U_r3p9xUhMzennJHoRbfk59BCC0ZrOA
-LINKEDIN_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36
+LINKEDIN_SESSION_COOKIE=xxxx
+LINKEDIN_USER_AGENT=xxxx
 
 # Server Configuration
 PORT=3000
@@ -58,7 +58,7 @@ docker-compose up -d
 #### Lanzar Búsqueda
 
 ```http
-POST /api/search/launch
+POST /api/search/start
 Content-Type: application/json
 
 {
@@ -78,61 +78,82 @@ Content-Type: application/json
 ```json
 {
   "success": true,
-  "containerId": "3835833896164009",
-  "message": "Search agent launched successfully"
+  "message": "Búsqueda iniciada en Phantombuster",
+  "data": {
+    "searchId": "search_...",
+    "containerId": "3835833896164009",
+    ...
+  }
 }
 ```
 
 #### Verificar Estado de Búsqueda
 
 ```http
-GET /api/search/status/{containerId}
+GET /api/search/status/:searchId
 ```
 
-#### Obtener Resultados
+#### Obtener Resultados por searchId
 
 ```http
-GET /api/search/results/{containerId}
+GET /api/search/results/:searchId
 ```
+
+#### Obtener Resultados por containerId (directo de Phantombuster)
+
+```http
+GET /api/search/results/container/:containerId
+```
+
+**Diferencia:**
+
+- `searchId`: ID interno de la API, útil si lanzaste la búsqueda desde aquí.
+- `containerId`: ID de ejecución de Phantombuster, puedes usarlo si lo tienes de otra fuente o historial.
 
 ### 👤 Profile Visitor Agent (Visitas de Perfiles)
 
 #### Visitar Perfil Individual
 
 ```http
-POST /api/visitor/visit-single
+POST /api/profile-visitor/visit-single
 Content-Type: application/json
 
 {
   "profileUrl": "https://www.linkedin.com/in/johndoe/",
-  "message": "Hi John, I noticed your experience in supply chain management. Would love to connect!"
+  "leadType": "cold",
+  "scheduleFollowUp": false,
+  "userId": "usuario1"
 }
 ```
 
-#### Visitar Múltiples Perfiles
+#### Visitar Lista de Perfiles
 
 ```http
-POST /api/visitor/visit-multiple
+POST /api/profile-visitor/visit-list
 Content-Type: application/json
 
 {
-  "profiles": [
-    {
-      "url": "https://www.linkedin.com/in/johndoe/",
-      "message": "Hi John, great profile!"
-    },
-    {
-      "url": "https://www.linkedin.com/in/janesmith/",
-      "message": "Hi Jane, love your experience!"
-    }
-  ]
+  "profileUrls": [
+    "https://www.linkedin.com/in/johndoe/",
+    "https://www.linkedin.com/in/janesmith/"
+  ],
+  "leadType": "warm",
+  "delayBetweenProfiles": 60,
+  "scheduleFollowUp": true,
+  "userId": "usuario1"
 }
 ```
 
 #### Verificar Estado de Visita
 
 ```http
-GET /api/visitor/status/{containerId}
+GET /api/profile-visitor/status/:visitId
+```
+
+#### Ver Límites Diarios
+
+```http
+GET /api/profile-visitor/limits/:userId?
 ```
 
 ### 📊 Agent Monitoring (Monitoreo de Agentes)
@@ -143,42 +164,16 @@ GET /api/visitor/status/{containerId}
 GET /api/agents/list
 ```
 
-**Respuesta:**
-
-```json
-{
-  "success": true,
-  "agents": [
-    {
-      "id": "5905827825464535",
-      "name": "LinkedIn Search Export",
-      "type": "search",
-      "isRunning": false,
-      "lastLaunch": null,
-      "lastLaunchAt": null
-    },
-    {
-      "id": "4413202499115443",
-      "name": "LinkedIn Profile Visitor",
-      "type": "visitor",
-      "isRunning": false,
-      "lastLaunch": null,
-      "lastLaunchAt": null
-    }
-  ]
-}
-```
-
 #### Obtener Detalles de Agente
 
 ```http
-GET /api/agents/details/{agentId}
+GET /api/agents/details/:agentId
 ```
 
 #### Verificar Estado de Agente
 
 ```http
-GET /api/agents/status/{agentId}/{containerId}
+GET /api/agents/status/:agentId/:containerId
 ```
 
 #### Monitoreo en Tiempo Real
@@ -187,36 +182,13 @@ GET /api/agents/status/{agentId}/{containerId}
 GET /api/agents/monitor?agentId={agentId}&containerId={containerId}
 ```
 
-**Respuesta:**
-
-```json
-{
-  "success": true,
-  "monitoring": {
-    "agentId": "5905827825464535",
-    "agentType": "search",
-    "containerId": "3835833896164009",
-    "status": "finished",
-    "isRunning": false,
-    "progress": 100,
-    "output": "Process finished successfully",
-    "lastUpdate": "2025-01-08T00:10:02.000Z",
-    "canSoftAbort": false
-  }
-}
-```
-
-### 📈 Daily Limits
-
-#### Verificar Límites Diarios
+### 📈 Límites Diarios
 
 ```http
-GET /api/limits/daily
+GET /api/profile-visitor/limits/:userId?
 ```
 
 ### 🔧 Health Check
-
-#### Verificar Estado del Sistema
 
 ```http
 GET /health
@@ -229,8 +201,9 @@ GET /health
 1. **Lanzar búsqueda:**
 
 ```bash
-curl -X POST http://localhost:3000/api/search/launch \
+curl -X POST http://localhost:3000/api/search/start \
   -H "Content-Type: application/json" \
+  -H "x-api-key: TU_API_KEY" \
   -d '{
     "searchParams": {
       "job_title": "Software Engineer",
@@ -243,13 +216,19 @@ curl -X POST http://localhost:3000/api/search/launch \
 2. **Monitorear progreso:**
 
 ```bash
-curl http://localhost:3000/api/agents/monitor?agentId=5905827825464535&containerId=3835833896164009
+curl http://localhost:3000/api/search/status/search_... -H "x-api-key: TU_API_KEY"
 ```
 
-3. **Obtener resultados:**
+3. **Obtener resultados por searchId:**
 
 ```bash
-curl http://localhost:3000/api/search/results/3835833896164009
+curl http://localhost:3000/api/search/results/search_... -H "x-api-key: TU_API_KEY"
+```
+
+4. **Obtener resultados por containerId:**
+
+```bash
+curl http://localhost:3000/api/search/results/container/3835833896164009 -H "x-api-key: TU_API_KEY"
 ```
 
 ### Flujo de Visitas de Perfiles
@@ -257,80 +236,26 @@ curl http://localhost:3000/api/search/results/3835833896164009
 1. **Visitar perfil individual:**
 
 ```bash
-curl -X POST http://localhost:3000/api/visitor/visit-single \
+curl -X POST http://localhost:3000/api/profile-visitor/visit-single \
   -H "Content-Type: application/json" \
+  -H "x-api-key: TU_API_KEY" \
   -d '{
     "profileUrl": "https://www.linkedin.com/in/johndoe/",
-    "message": "Hi John, would love to connect!"
+    "leadType": "cold"
   }'
 ```
 
-2. **Verificar estado:**
+2. **Verificar estado de la visita:**
 
 ```bash
-curl http://localhost:3000/api/visitor/status/{containerId}
+curl http://localhost:3000/api/profile-visitor/status/visit_... -H "x-api-key: TU_API_KEY"
 ```
 
-## 📊 Estados de Agentes
+3. **Ver límites diarios:**
 
-| Estado     | Descripción             | Acción              |
-| ---------- | ----------------------- | ------------------- |
-| `running`  | Agente ejecutándose     | Monitorear progreso |
-| `finished` | Completado exitosamente | Obtener resultados  |
-| `error`    | Error en ejecución      | Revisar logs        |
-| `null`     | No ejecutándose         | Listo para lanzar   |
-
-## 🔍 Monitoreo en Tiempo Real
-
-### Información Disponible
-
-- ✅ **Container ID**: Identificador único de ejecución
-- ✅ **Status**: Estado actual (running/finished/error)
-- ✅ **Progress**: Progreso (0-100)
-- ✅ **Output**: Logs en tiempo real
-- ✅ **isRunning**: Boolean de ejecución
-- ✅ **lastUpdate**: Timestamp de última actualización
-- ✅ **canSoftAbort**: Posibilidad de abortar ejecución
-
-### Ejemplo de Monitoreo Continuo
-
-```javascript
-// Monitorear agente cada 5 segundos
-const monitorAgent = async (agentId, containerId) => {
-  const response = await fetch(
-    `/api/agents/monitor?agentId=${agentId}&containerId=${containerId}`
-  );
-  const data = await response.json();
-
-  if (data.monitoring.status === "finished") {
-    console.log("✅ Agente completado");
-    return await fetch(`/api/search/results/${containerId}`);
-  } else if (data.monitoring.status === "running") {
-    console.log(`🔄 Progreso: ${data.monitoring.progress}%`);
-    setTimeout(() => monitorAgent(agentId, containerId), 5000);
-  }
-};
+```bash
+curl http://localhost:3000/api/profile-visitor/limits/usuario1 -H "x-api-key: TU_API_KEY"
 ```
-
-## 🛠️ Solución de Problemas
-
-### Error 404 en Lanzamiento
-
-- Verificar que los IDs de agentes sean correctos
-- Comprobar que la API key sea válida
-- Asegurar que los agentes estén configurados en Phantombuster
-
-### Agente No Responde
-
-- Verificar el sessionCookie de LinkedIn
-- Comprobar el userAgent
-- Revisar los logs del agente en Phantombuster
-
-### Límites Excedidos
-
-- Usar `/api/limits/daily` para verificar uso actual
-- Esperar al siguiente día o cambiar de cuenta
-- Implementar rotación de cuentas
 
 ## 📁 Estructura del Proyecto
 
@@ -340,8 +265,7 @@ api-phantombuster/
 ├── package.json               # Dependencias
 ├── .env                      # Variables de entorno
 ├── README.md                 # Documentación
-├── Phantombuster-API-Local-Docker.postman_collection.json    # Colección Postman
-└── Phantombuster-API-Local-Docker.postman_environment.json   # Variables Postman
+└── ...
 ```
 
 ## 🚀 Despliegue
