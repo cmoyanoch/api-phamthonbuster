@@ -1,4 +1,4 @@
-# Phantombuster API - Local Docker
+# Phantombuster API
 
 API completa para integración con Phantombuster, incluyendo búsquedas masivas de LinkedIn, visitas de perfiles y monitoreo en tiempo real de agentes.
 

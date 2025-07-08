@@ -1305,6 +1305,113 @@ app.get('/api/search/results/:searchId', authenticateApiKey, async (req, res) =>
     }
 });
 
+// Endpoint para obtener historial de búsquedas
+app.get('/api/search/history', authenticateApiKey, async (req, res) => {
+    try {
+        const { limit = 50, offset = 0, status } = req.query;
+
+        // Obtener todas las búsquedas del store
+        const allSearches = [];
+        for (const [searchId, search] of searchStore.entries()) {
+            allSearches.push({
+                searchId: search.searchId,
+                containerId: search.containerId,
+                status: search.status,
+                progress: search.progress,
+                createdAt: search.createdAt,
+                completedAt: search.completedAt,
+                searchParams: search.searchParams,
+                totalResults: search.results ? search.results.length : 0,
+                keywords: search.searchParams?.job_title || 'N/A',
+                location: search.searchParams?.location || 'N/A'
+            });
+        }
+
+        // Filtrar por status si se especifica
+        let filteredSearches = allSearches;
+        if (status) {
+            filteredSearches = allSearches.filter(search => search.status === status);
+        }
+
+        // Ordenar por fecha de creación (más recientes primero)
+        filteredSearches.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        // Aplicar paginación
+        const total = filteredSearches.length;
+        const paginatedSearches = filteredSearches.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+
+        res.json({
+            success: true,
+            data: {
+                searches: paginatedSearches,
+                pagination: {
+                    total,
+                    limit: parseInt(limit),
+                    offset: parseInt(offset),
+                    hasMore: parseInt(offset) + parseInt(limit) < total
+                },
+                summary: {
+                    totalSearches: allSearches.length,
+                    completedSearches: allSearches.filter(s => s.status === 'completed').length,
+                    runningSearches: allSearches.filter(s => s.status === 'running').length,
+                    failedSearches: allSearches.filter(s => s.status === 'failed').length,
+                    totalResults: allSearches.reduce((sum, s) => sum + s.totalResults, 0)
+                }
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error obteniendo historial:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo historial de búsquedas',
+            error: error.message
+        });
+    }
+});
+
+// Endpoint para obtener detalles de una búsqueda específica
+app.get('/api/search/details/:searchId', authenticateApiKey, async (req, res) => {
+    try {
+        const { searchId } = req.params;
+        const search = searchStore.get(searchId);
+
+        if (!search) {
+            return res.status(404).json({
+                success: false,
+                message: 'Búsqueda no encontrada',
+                error: 'SEARCH_NOT_FOUND'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                searchId: search.searchId,
+                containerId: search.containerId,
+                status: search.status,
+                progress: search.progress,
+                createdAt: search.createdAt,
+                completedAt: search.completedAt,
+                searchParams: search.searchParams,
+                totalResults: search.results ? search.results.length : 0,
+                keywords: search.searchParams?.job_title || 'N/A',
+                location: search.searchParams?.location || 'N/A',
+                industryCodes: search.searchParams?.industry_codes || [],
+                connectionDegree: search.searchParams?.connection_degree || [],
+                resultsPerLaunch: search.searchParams?.results_per_launch || 0,
+                totalResultsRequested: search.searchParams?.total_results || 0
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error obteniendo detalles:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo detalles de búsqueda',
+            error: error.message
+        });
+    }
+});
+
 // ============================================================================
 // ENDPOINTS DE PROFILE VISITOR (LinkedIn Profile Visitor)
 // ============================================================================
