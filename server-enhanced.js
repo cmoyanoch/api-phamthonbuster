@@ -619,7 +619,7 @@ class PhantombusterService {
 
         if (searchParams.location) {
             // LinkedIn usa geoUrn para ubicaciones específicas
-            params.append('geoUrn', `searchParams.location`); // Ejemplo para Francia
+            params.append('geoUrn', `[${searchParams.location}]`); // Ejemplo para Francia
         }
 
         if (searchParams.industry_codes && searchParams.industry_codes.length > 0) {
