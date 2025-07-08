@@ -1753,6 +1753,95 @@ app.get('/api/agents/monitor', async (req, res) => {
     }
 });
 
+// Endpoint para obtener historial de búsquedas desde Phantombuster
+app.get('/api/search/phantombuster-history', authenticateApiKey, async (req, res) => {
+    try {
+        const { limit = 10 } = req.query;
+
+        // Obtener información del agente desde Phantombuster
+        const agentResponse = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch?id=${process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID}`, {
+            headers: {
+                'X-Phantombuster-Key': process.env.PHANTOMBUSTER_API_KEY
+            }
+        });
+
+        const agentData = await agentResponse.json();
+
+        // Obtener las últimas ejecuciones
+        const recentContainers = [];
+
+        // Intentar obtener información de las últimas ejecuciones
+        // Nota: Phantombuster no proporciona un endpoint directo para historial
+        // pero podemos usar el estado actual del agente
+
+        res.json({
+            success: true,
+            data: {
+                agent: {
+                    id: agentData.id,
+                    name: agentData.name,
+                    status: agentData.status,
+                    lastLaunch: agentData.lastLaunch,
+                    lastLaunchAt: agentData.lastLaunchAt
+                },
+                recentExecutions: recentContainers,
+                message: "Para obtener el historial completo, consulta el panel de Phantombuster directamente"
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error obteniendo historial de Phantombuster:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo historial de Phantombuster',
+            error: error.message
+        });
+    }
+});
+
+// Endpoint para obtener información de un container específico
+app.get('/api/search/container/:containerId', authenticateApiKey, async (req, res) => {
+    try {
+        const { containerId } = req.params;
+
+        const response = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch-output?id=${process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID}&containerId=${containerId}`, {
+            headers: {
+                'X-Phantombuster-Key': process.env.PHANTOMBUSTER_API_KEY
+            }
+        });
+
+        const data = await response.json();
+
+        // Extraer información relevante del output
+        const outputLines = data.output ? data.output.split('\r\n') : [];
+        const keywords = outputLines.find(line => line.includes('Input:'))?.replace('[info_]ℹ️ Input:', '').trim();
+        const totalResults = outputLines.find(line => line.includes('Total results count:'))?.match(/\d+/)?.[0];
+        const resultsFound = outputLines.find(line => line.includes('Got') && line.includes('profiles'))?.match(/\d+/)?.[0];
+
+        res.json({
+            success: true,
+            data: {
+                containerId: data.containerId,
+                status: data.status,
+                isRunning: data.isAgentRunning,
+                progress: data.progress || 0,
+                keywords: keywords || 'N/A',
+                totalResults: totalResults || 0,
+                resultsFound: resultsFound || 0,
+                startedAt: data.mostRecentEndedAt ? new Date(data.mostRecentEndedAt).toISOString() : null,
+                output: data.output,
+                canSoftAbort: data.canSoftAbort || false
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error obteniendo información del container:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error obteniendo información del container',
+            error: error.message
+        });
+    }
+});
+
 // ============================================================================
 // MIDDLEWARE DE ERRORES Y RUTAS NO ENCONTRADAS
 // ============================================================================
