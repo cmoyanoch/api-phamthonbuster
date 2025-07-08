@@ -1,446 +1,378 @@
-# 🚀 API Phantombuster - Servidor de Producción
+# Phantombuster API - Local Docker
 
-## 📋 Descripción
+API completa para integración con Phantombuster, incluyendo búsquedas masivas de LinkedIn, visitas de perfiles y monitoreo en tiempo real de agentes.
 
-API de producción que integra directamente con la API de Phantombuster para extracción de leads de LinkedIn. El servidor utiliza **dos agentes especializados** para diferentes funcionalidades:
+## 🚀 Características
 
-- **LinkedIn Search Export**: Para búsquedas y extracción masiva de leads
-- **LinkedIn Profile Visitor**: Para visitar perfiles individuales y extraer datos detallados
+- **🔍 Búsquedas Masivas**: Extracción de leads usando LinkedIn Search Export
+- **👤 Visitas de Perfiles**: Visitas individuales y múltiples con LinkedIn Profile Visitor
+- **📊 Monitoreo en Tiempo Real**: Seguimiento del estado de agentes y containers
+- **📈 Límites Diarios**: Control de uso y límites de la API
+- **🔧 Health Checks**: Verificación del estado del sistema
 
-## ✨ Características Principales
+## 📋 Requisitos
 
-### 🔄 Integración con Phantombuster
+- Node.js 18+
+- Docker (opcional)
+- Cuenta de Phantombuster con API Key
+- Agentes configurados en Phantombuster
 
-- **API Real**: Integración directa con la API oficial de Phantombuster
-- **Dual Agent Architecture**: Dos agentes especializados para diferentes funcionalidades
-- **Búsquedas en tiempo real**: Ejecuta búsquedas en LinkedIn a través de Phantombuster
-- **Monitoreo de estado**: Consulta el progreso de las búsquedas en Phantombuster
-- **Resultados reales**: Procesa y enriquece los datos extraídos de LinkedIn
+## 🔧 Configuración
 
-### 🎯 Clasificación Automática de Leads
+### Variables de Entorno
 
-- **connectionDegree**: Campo automático basado en datos de LinkedIn
-- **Mapeo inteligente**: Determina el grado de conexión (`1st`, `2nd`, `3rd`) basado en:
-  - Conexiones mutuas
-  - Nivel de conexión en LinkedIn
-  - Información de red directa
-- **Clasificación por tipo**: Mapea automáticamente a tipos de lead (`hot`, `warm`, `cold`)
+Crea un archivo `.env` en la raíz del proyecto:
 
-### 🤖 Agentes de Phantombuster
+```env
+# Phantombuster API Configuration
+PHANTOMBUSTER_API_KEY=r2KioJAihnsDpNPOxl3Yn5XXxPXvvA1hhXSpC4VgQGQ
+PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID=5905827825464535
+PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID=4413202499115443
 
-La API utiliza dos agentes especializados de Phantombuster:
-
-#### 🎯 LinkedIn Profile Visitor (ID: 4413202499115443)
-
-- **Función**: Visitar perfiles individuales de LinkedIn
-- **Endpoints**: `/api/profile-visitor/*`
-- **Características**:
-  - Visita perfiles específicos
-  - Extrae datos detallados del perfil
-  - Simula comportamiento humano
-  - Respeta límites de LinkedIn
-  - Soporte para email discovery
-  - Screenshots y datos adicionales
-
-#### 🔍 LinkedIn Search Export (ID: 5905827825464535)
-
-- **Función**: Búsquedas y extracción masiva de leads
-- **Endpoints**: `/api/search/*`
-- **Características**:
-  - Búsquedas por criterios (título, ubicación, industria)
-  - Extracción de resultados de búsqueda
-  - Enriquecimiento automático de datos
-  - Clasificación por connectionDegree
-  - Soporte para múltiples URLs de búsqueda
-  - Eliminación de duplicados
-
-### 🌍 Procesamiento de Datos
-
-- **Datos de LinkedIn**: Nombres, empresas, ubicaciones
-- **Información de conexiones**: Datos de la red de LinkedIn
-- **Enriquecimiento automático**: Agrega campos adicionales como `connectionDegree`
-- **Validación de datos**: Procesa y valida los datos recibidos de Phantombuster
-
-## 🛠️ Tecnologías Utilizadas
-
-- **Node.js** - Runtime de JavaScript
-- **Express.js** - Framework web
-- **Helmet** - Seguridad HTTP
-- **CORS** - Cross-Origin Resource Sharing
-- **Morgan** - Logging de requests
-- **Compression** - Compresión de respuestas
-- **Rate Limiting** - Limitación de requests
-- **Docker** - Containerización
-
-## 🚀 Instalación y Configuración
-
-### Prerrequisitos
-
-- Docker y Docker Compose
-- Node.js 18+ (para desarrollo local)
-
-### 1. Clonar el Repositorio
-
-```bash
-git clone <repository-url>
-cd api-phamthonbuster
-```
-
-### 2. Configurar Variables de Entorno
-
-```bash
-# Copiar archivo de configuración
-cp env.example env
-
-# Editar variables de entorno
-nano env
-```
-
-### 3. Variables de Entorno Principales
-
-```bash
-# Configuración del servidor
-NODE_ENV=production
-PORT=3001
-SKIP_DATABASE=true
-
-# API Key para autenticación
-API_KEY=your-secure-api-key
-
-# Phantombuster API (REQUERIDO para producción)
-PHANTOMBUSTER_API_KEY=your-phantombuster-api-key
-
-# 🎯 Agentes de Phantombuster
-# LinkedIn Profile Visitor - Para visitar perfiles individuales
-PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID=your-profile-visitor-agent-id
-
-# LinkedIn Search Export - Para búsquedas y extracción de leads
-PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID=your-search-export-agent-id
-
-# 🔐 Configuración de LinkedIn (REQUERIDO)
-LINKEDIN_SESSION_COOKIE=your-linkedin-session-cookie
+# LinkedIn Session Configuration
+LINKEDIN_SESSION_COOKIE=AQEFARABAAAAABansMgAAAGXfFcaJwAAAZgHBAqlTgAAs3VybjpsaTplbnRlcnByaXNlQXV0aFRva2VuOmVKeGpaQUFDcVMybm8wQzA3S1NTOVNCYVhFcGpDeU9JVWNGOHNBSE1pTjZrRXMzQUNBQzJ3UWdmXnVybjpsaTplbnRlcnByaXNlUHJvZmlsZToodXJuOmxpOmVudGVycHJpc2VBY2NvdW50OjQ0ODA1NjE1NCw0OTYxMzczOTEpXnVybjpsaTptZW1iZXI6OTkxOTk2NDExFSWvrC62HmuIt0_WDVb5g4WhXF5LTvr80EuNLOWNNDHfBkz9gnleV4o1e1CbDDg3qlPpQyOOnHrM4HIokY4m3kW9brdTTOK9CqrsUIXsCRTJ-D8C0d74dlAPdAktAqFR-XfPyzdfser4bYQGzeEpTcIGDela_EH1gH54g11U_r3p9xUhMzennJHoRbfk59BCC0ZrOA
 LINKEDIN_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36
 
-# Redis (opcional para cache)
-REDIS_URL=redis://localhost:6379
+# Server Configuration
+PORT=3000
+NODE_ENV=development
 ```
 
-### ⚠️ Configuración de Phantombuster
-
-Para usar la API de Phantombuster, necesitas:
-
-1. **API Key de Phantombuster**: Obtén tu API key desde el panel de Phantombuster
-2. **Agent IDs**: IDs de los agentes específicos para cada funcionalidad:
-   - **Profile Visitor Agent ID**: Para visitar perfiles individuales
-   - **Search Export Agent ID**: Para búsquedas y extracción de leads
-3. **Session Cookie de LinkedIn**: Requerido para que los agentes funcionen
-4. **Configurar los agentes**: Asegúrate de que tus agentes estén configurados correctamente en Phantombuster
-
-### 🔐 Obtener Session Cookie de LinkedIn
-
-Para obtener tu session cookie de LinkedIn:
-
-1. **Inicia sesión en LinkedIn** en tu navegador
-2. **Abre las herramientas de desarrollador** (F12)
-3. **Ve a la pestaña Application/Storage** → Cookies → https://www.linkedin.com
-4. **Busca la cookie `li_at`** y copia su valor
-5. **Pega el valor en la variable `LINKEDIN_SESSION_COOKIE`**
-
-**⚠️ Importante**: La session cookie expira cuando cierras sesión en LinkedIn. Debes renovarla periódicamente.
-
-### 4. Ejecutar con Docker
+### Instalación
 
 ```bash
-# Construir y ejecutar
-docker compose up --build -d
+# Instalar dependencias
+npm install
 
-# Ver logs
-docker compose logs -f phantombuster-api
+# Iniciar servidor
+npm start
 
-# Detener
-docker compose down
+# O con Docker
+docker-compose up -d
 ```
 
-### 5. Verificar Instalación
+## 📚 Endpoints
 
-```bash
-# Health check
-curl http://localhost:3001/health
+### 🔍 Search Agent (Búsquedas Masivas)
 
-# Verificar API
-curl http://localhost:3001/api/health
+#### Lanzar Búsqueda
 
-# Verificar configuración
-curl -X GET http://localhost:3001/api/config -H "X-API-Key: your-api-key"
-```
+```http
+POST /api/search/launch
+Content-Type: application/json
 
-## 📊 Estructura de Datos
-
-### Parámetros de Búsqueda
-
-```json
 {
   "searchParams": {
-    "job_title": "string", // Título de trabajo
-    "industry_codes": ["string"], // Códigos de industria
-    "location": "string" // Ubicación (ciudades, país)
-  },
-  "options": {
-    "numberOfResultsPerLaunch": 1000, // Número de resultados por lanzamiento
-    "numberOfResultsPerSearch": 1000, // Número de resultados por búsqueda
-    "removeDuplicateProfiles": true, // Eliminar duplicados
-    "enrichLeadsWithAdditionalInformation": true // Enriquecer datos
+    "job_title": "Supply Chain Director",
+    "location": "France",
+    "industry_codes": ["20", "27", "50", "53", "96"],
+    "connection_degree": ["2nd", "3rd+"],
+    "results_per_launch": 10,
+    "total_results": 100
   }
 }
 ```
 
-### Parámetros de Profile Visitor
-
-```json
-{
-  "profileUrls": ["string"], // URLs de perfiles a visitar
-  "options": {
-    "numberOfAddsPerLaunch": 10, // Perfiles por lanzamiento (máx: 80)
-    "dwellTime": false, // Simular tiempo de permanencia
-    "emailChooser": "phantombuster", // Servicio de email discovery
-    "saveImg": false, // Guardar imágenes de perfil
-    "takeScreenshot": false, // Tomar screenshots
-    "scrapeInterests": false, // Extraer intereses
-    "scrapeAccomplishments": false // Extraer logros
-  }
-}
-```
-
-### Estructura de Resultados
+**Respuesta:**
 
 ```json
 {
   "success": true,
-  "data": {
-    "containerId": "string",
-    "status": "running|finished|failed",
-    "progress": 0-100,
-    "results": [
-      {
-        "linkedin_url": "string",
-        "first_name": "string",
-        "last_name": "string",
-        "headline": "string",
-        "company_name": "string",
-        "location": "string",
-        "industry": "string",
-        "profile_url": "string",
-        "email": "string",
-        "phone": "string",
-        "connectionDegree": "1st|2nd|3rd",
-        "extracted_at": "ISO-8601",
-        "mutual_connections": "number",
-        "connection_level": "number",
-        "profile_views": "number",
-        "last_activity": "string"
-      }
-    ]
+  "containerId": "3835833896164009",
+  "message": "Search agent launched successfully"
+}
+```
+
+#### Verificar Estado de Búsqueda
+
+```http
+GET /api/search/status/{containerId}
+```
+
+#### Obtener Resultados
+
+```http
+GET /api/search/results/{containerId}
+```
+
+### 👤 Profile Visitor Agent (Visitas de Perfiles)
+
+#### Visitar Perfil Individual
+
+```http
+POST /api/visitor/visit-single
+Content-Type: application/json
+
+{
+  "profileUrl": "https://www.linkedin.com/in/johndoe/",
+  "message": "Hi John, I noticed your experience in supply chain management. Would love to connect!"
+}
+```
+
+#### Visitar Múltiples Perfiles
+
+```http
+POST /api/visitor/visit-multiple
+Content-Type: application/json
+
+{
+  "profiles": [
+    {
+      "url": "https://www.linkedin.com/in/johndoe/",
+      "message": "Hi John, great profile!"
+    },
+    {
+      "url": "https://www.linkedin.com/in/janesmith/",
+      "message": "Hi Jane, love your experience!"
+    }
+  ]
+}
+```
+
+#### Verificar Estado de Visita
+
+```http
+GET /api/visitor/status/{containerId}
+```
+
+### 📊 Agent Monitoring (Monitoreo de Agentes)
+
+#### Listar Todos los Agentes
+
+```http
+GET /api/agents/list
+```
+
+**Respuesta:**
+
+```json
+{
+  "success": true,
+  "agents": [
+    {
+      "id": "5905827825464535",
+      "name": "LinkedIn Search Export",
+      "type": "search",
+      "isRunning": false,
+      "lastLaunch": null,
+      "lastLaunchAt": null
+    },
+    {
+      "id": "4413202499115443",
+      "name": "LinkedIn Profile Visitor",
+      "type": "visitor",
+      "isRunning": false,
+      "lastLaunch": null,
+      "lastLaunchAt": null
+    }
+  ]
+}
+```
+
+#### Obtener Detalles de Agente
+
+```http
+GET /api/agents/details/{agentId}
+```
+
+#### Verificar Estado de Agente
+
+```http
+GET /api/agents/status/{agentId}/{containerId}
+```
+
+#### Monitoreo en Tiempo Real
+
+```http
+GET /api/agents/monitor?agentId={agentId}&containerId={containerId}
+```
+
+**Respuesta:**
+
+```json
+{
+  "success": true,
+  "monitoring": {
+    "agentId": "5905827825464535",
+    "agentType": "search",
+    "containerId": "3835833896164009",
+    "status": "finished",
+    "isRunning": false,
+    "progress": 100,
+    "output": "Process finished successfully",
+    "lastUpdate": "2025-01-08T00:10:02.000Z",
+    "canSoftAbort": false
   }
 }
 ```
 
-## 🔌 Endpoints de la API
+### 📈 Daily Limits
 
-### 🔍 Búsquedas (LinkedIn Search Export)
+#### Verificar Límites Diarios
 
-#### Iniciar Búsqueda
-
-```bash
-POST /api/search/start
+```http
+GET /api/limits/daily
 ```
 
-**Ejemplo:**
+### 🔧 Health Check
+
+#### Verificar Estado del Sistema
+
+```http
+GET /health
+```
+
+## 🎯 Ejemplos de Uso
+
+### Flujo Completo de Búsqueda
+
+1. **Lanzar búsqueda:**
 
 ```bash
-curl -X POST http://localhost:3001/api/search/start \
+curl -X POST http://localhost:3000/api/search/launch \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: your-api-key" \
   -d '{
     "searchParams": {
       "job_title": "Software Engineer",
-      "location": "Madrid, Spain"
-    },
-    "options": {
-      "numberOfResultsPerLaunch": 100,
-      "removeDuplicateProfiles": true
+      "location": "Madrid, Spain",
+      "results_per_launch": 10
     }
   }'
 ```
 
-#### Estado de Búsqueda
+2. **Monitorear progreso:**
 
 ```bash
-GET /api/search/status/:searchId
+curl http://localhost:3000/api/agents/monitor?agentId=5905827825464535&containerId=3835833896164009
 ```
 
-#### Resultados de Búsqueda
+3. **Obtener resultados:**
 
 ```bash
-GET /api/search/results/:searchId
+curl http://localhost:3000/api/search/results/3835833896164009
 ```
 
-### 🎯 Profile Visitor (LinkedIn Profile Visitor)
+### Flujo de Visitas de Perfiles
 
-#### Visitar Perfil Individual
-
-```bash
-POST /api/profile-visitor/visit-single
-```
-
-**Ejemplo:**
+1. **Visitar perfil individual:**
 
 ```bash
-curl -X POST http://localhost:3001/api/profile-visitor/visit-single \
+curl -X POST http://localhost:3000/api/visitor/visit-single \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: your-api-key" \
   -d '{
-    "profileUrl": "https://www.linkedin.com/in/johndoe",
-    "options": {
-      "numberOfAddsPerLaunch": 1,
-      "emailChooser": "phantombuster",
-      "takeScreenshot": true
-    }
+    "profileUrl": "https://www.linkedin.com/in/johndoe/",
+    "message": "Hi John, would love to connect!"
   }'
 ```
 
-#### Visitar Lista de Perfiles
+2. **Verificar estado:**
 
 ```bash
-POST /api/profile-visitor/visit-list
+curl http://localhost:3000/api/visitor/status/{containerId}
 ```
 
-#### Estado de Visita
+## 📊 Estados de Agentes
 
-```bash
-GET /api/profile-visitor/status/:visitId
+| Estado     | Descripción             | Acción              |
+| ---------- | ----------------------- | ------------------- |
+| `running`  | Agente ejecutándose     | Monitorear progreso |
+| `finished` | Completado exitosamente | Obtener resultados  |
+| `error`    | Error en ejecución      | Revisar logs        |
+| `null`     | No ejecutándose         | Listo para lanzar   |
+
+## 🔍 Monitoreo en Tiempo Real
+
+### Información Disponible
+
+- ✅ **Container ID**: Identificador único de ejecución
+- ✅ **Status**: Estado actual (running/finished/error)
+- ✅ **Progress**: Progreso (0-100)
+- ✅ **Output**: Logs en tiempo real
+- ✅ **isRunning**: Boolean de ejecución
+- ✅ **lastUpdate**: Timestamp de última actualización
+- ✅ **canSoftAbort**: Posibilidad de abortar ejecución
+
+### Ejemplo de Monitoreo Continuo
+
+```javascript
+// Monitorear agente cada 5 segundos
+const monitorAgent = async (agentId, containerId) => {
+  const response = await fetch(
+    `/api/agents/monitor?agentId=${agentId}&containerId=${containerId}`
+  );
+  const data = await response.json();
+
+  if (data.monitoring.status === "finished") {
+    console.log("✅ Agente completado");
+    return await fetch(`/api/search/results/${containerId}`);
+  } else if (data.monitoring.status === "running") {
+    console.log(`🔄 Progreso: ${data.monitoring.progress}%`);
+    setTimeout(() => monitorAgent(agentId, containerId), 5000);
+  }
+};
 ```
 
-#### Límites Diarios
+## 🛠️ Solución de Problemas
 
-```bash
-GET /api/profile-visitor/limits
+### Error 404 en Lanzamiento
+
+- Verificar que los IDs de agentes sean correctos
+- Comprobar que la API key sea válida
+- Asegurar que los agentes estén configurados en Phantombuster
+
+### Agente No Responde
+
+- Verificar el sessionCookie de LinkedIn
+- Comprobar el userAgent
+- Revisar los logs del agente en Phantombuster
+
+### Límites Excedidos
+
+- Usar `/api/limits/daily` para verificar uso actual
+- Esperar al siguiente día o cambiar de cuenta
+- Implementar rotación de cuentas
+
+## 📁 Estructura del Proyecto
+
+```
+api-phantombuster/
+├── server-enhanced.js          # Servidor principal
+├── package.json               # Dependencias
+├── .env                      # Variables de entorno
+├── README.md                 # Documentación
+├── Phantombuster-API-Local-Docker.postman_collection.json    # Colección Postman
+└── Phantombuster-API-Local-Docker.postman_environment.json   # Variables Postman
 ```
 
-### 📊 Configuración y Estado
+## 🚀 Despliegue
 
-#### Verificar Configuración
-
-```bash
-GET /api/config
-```
-
-#### Estadísticas Generales
-
-```bash
-GET /api/stats/overview
-```
-
-## 🐛 Solución de Problemas
-
-### Problemas Comunes
-
-1. **Error 404 en Phantombuster API**
-
-   - Verificar que las credenciales sean correctas
-   - Comprobar que el session cookie de LinkedIn sea válido
-   - Verificar que los Agent IDs existan y estén activos
-
-2. **Session Cookie expirada**
-
-   - Renovar la session cookie de LinkedIn
-   - Actualizar la variable `LINKEDIN_SESSION_COOKIE`
-
-3. **Límites diarios alcanzados**
-
-   - Verificar límites con `/api/profile-visitor/limits`
-   - Esperar al siguiente día o usar una cuenta diferente
-
-4. **Docker no inicia**
-   - Verificar logs: `docker compose logs phantombuster-api`
-   - Reconstruir: `docker compose down && docker compose up --build -d`
-
-### Logs de Debug
-
-```bash
-# Ver logs en tiempo real
-docker compose logs -f phantombuster-api
-
-# Ver logs específicos
-docker compose logs phantombuster-api | grep "ERROR"
-```
-
-## 🔄 Desarrollo Local
-
-### Instalación de Dependencias
-
-```bash
-npm install
-```
-
-### Ejecutar en Desarrollo
+### Local
 
 ```bash
 npm start
-# o
-node server-enhanced.js
 ```
 
-### Variables de Entorno de Desarrollo
+### Docker
 
 ```bash
-NODE_ENV=development
-PORT=3001
-API_KEY=dev-api-key-12345
-SKIP_DATABASE=true
+docker-compose up -d
 ```
 
-## 📝 Notas de Implementación
+### Producción
 
-### Arquitectura de Agentes
+```bash
+NODE_ENV=production npm start
+```
 
-- **Separación de responsabilidades**: Cada agente tiene una función específica
-- **Configuración independiente**: Cada agente puede tener diferentes configuraciones
-- **Escalabilidad**: Fácil agregar nuevos agentes para diferentes funcionalidades
+## 📞 Soporte
 
-### Seguridad
+Para problemas o preguntas:
 
-- **API Key**: Autenticación requerida para todos los endpoints
-- **Rate Limiting**: Protección contra abuso
-- **Session Cookies**: Manejo seguro de credenciales de LinkedIn
-
-### Rendimiento
-
-- **Límites diarios**: Respeto de límites de LinkedIn
-- **Procesamiento asíncrono**: Las búsquedas se ejecutan en segundo plano
-- **Caché**: Almacenamiento en memoria para resultados
-
-## 🤝 Contribución
-
-1. Fork el proyecto
-2. Crear una rama para tu feature (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abrir un Pull Request
-
-## 📄 Licencia
-
-Este proyecto está bajo la Licencia MIT. Ver el archivo `LICENSE` para más detalles.
-
-## 🆘 Soporte
-
-Para soporte técnico o preguntas:
-
-- Crear un issue en el repositorio
-- Revisar la documentación de la API
-- Verificar los logs del servidor
+1. Revisar los logs del servidor
+2. Verificar la configuración de variables de entorno
+3. Comprobar el estado de los agentes en Phantombuster
+4. Usar los endpoints de monitoreo para diagnóstico
 
 ---
 
-**¡Disfruta usando la API de Phantombuster Local! 🚀**
-
-# api-phamthonbuster
+**Nota**: Esta API está diseñada para uso responsable y respeta los límites de LinkedIn y Phantombuster.

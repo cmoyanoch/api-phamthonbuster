@@ -1491,6 +1491,161 @@ app.get('/api/stats/overview', authenticateApiKey, (req, res) => {
     }
 });
 
+// Endpoint para verificar estado de un container específico
+app.get('/api/agents/status/:agentId/:containerId', async (req, res) => {
+    try {
+        const { agentId, containerId } = req.params;
+
+        const response = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch-output?id=${agentId}&containerId=${containerId}`, {
+            headers: {
+                'X-Phantombuster-Key': process.env.PHANTOMBUSTER_API_KEY
+            }
+        });
+
+        const data = await response.json();
+
+        res.json({
+            success: true,
+            agentId,
+            containerId,
+            status: data.status,
+            isRunning: data.isAgentRunning,
+            progress: data.progress || 0,
+            output: data.output,
+            lastUpdate: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Error checking agent status:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Error checking agent status',
+            details: error.message
+        });
+    }
+});
+
+// Endpoint para listar todos los agentes
+app.get('/api/agents/list', async (req, res) => {
+    try {
+        const response = await fetch('https://api.phantombuster.com/api/v2/agents/fetch-all', {
+            headers: {
+                'X-Phantombuster-Key': process.env.PHANTOMBUSTER_API_KEY
+            }
+        });
+
+        const agents = await response.json();
+
+        // Filtrar solo nuestros agentes
+        const ourAgents = agents.filter(agent =>
+            agent.id === process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID ||
+            agent.id === process.env.PHANTOMBUSTER_PROFILE_VISITOR_AGENT_ID
+        );
+
+        res.json({
+            success: true,
+            agents: ourAgents.map(agent => ({
+                id: agent.id,
+                name: agent.name,
+                type: agent.id === process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID ? 'search' : 'visitor',
+                isRunning: agent.isRunning,
+                lastLaunch: agent.lastLaunch,
+                lastLaunchAt: agent.lastLaunchAt
+            }))
+        });
+    } catch (error) {
+        console.error('Error listing agents:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Error listing agents',
+            details: error.message
+        });
+    }
+});
+
+// Endpoint para obtener detalles de un agente específico
+app.get('/api/agents/details/:agentId', async (req, res) => {
+    try {
+        const { agentId } = req.params;
+
+        const response = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch?id=${agentId}`, {
+            headers: {
+                'X-Phantombuster-Key': process.env.PHANTOMBUSTER_API_KEY
+            }
+        });
+
+        const agent = await response.json();
+
+        res.json({
+            success: true,
+            agent: {
+                id: agent.id,
+                name: agent.name,
+                type: agent.id === process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID ? 'search' : 'visitor',
+                isRunning: agent.isRunning,
+                lastLaunch: agent.lastLaunch,
+                lastLaunchAt: agent.lastLaunchAt,
+                status: agent.status,
+                createdAt: agent.createdAt,
+                updatedAt: agent.updatedAt
+            }
+        });
+    } catch (error) {
+        console.error('Error getting agent details:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Error getting agent details',
+            details: error.message
+        });
+    }
+});
+
+// Endpoint para monitoreo en tiempo real (WebSocket-like polling)
+app.get('/api/agents/monitor', async (req, res) => {
+    try {
+        const { agentId, containerId } = req.query;
+
+        if (!agentId || !containerId) {
+            return res.status(400).json({
+                success: false,
+                error: 'agentId and containerId are required'
+            });
+        }
+
+        const response = await fetch(`https://api.phantombuster.com/api/v2/agents/fetch-output?id=${agentId}&containerId=${containerId}`, {
+            headers: {
+                'X-Phantombuster-Key': process.env.PHANTOMBUSTER_API_KEY
+            }
+        });
+
+        const data = await response.json();
+
+        // Determinar el tipo de agente
+        const agentType = agentId === process.env.PHANTOMBUSTER_SEARCH_EXPORT_AGENT_ID ? 'search' : 'visitor';
+
+        res.json({
+            success: true,
+            monitoring: {
+                agentId,
+                agentType,
+                containerId,
+                status: data.status,
+                isRunning: data.isAgentRunning,
+                progress: data.progress || 0,
+                output: data.output,
+                lastUpdate: new Date().toISOString(),
+                canSoftAbort: data.canSoftAbort || false
+            }
+        });
+    } catch (error) {
+        console.error('Error monitoring agent:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Error monitoring agent',
+            details: error.message
+        });
+    }
+});
+
 // ============================================================================
 // MIDDLEWARE DE ERRORES Y RUTAS NO ENCONTRADAS
 // ============================================================================
