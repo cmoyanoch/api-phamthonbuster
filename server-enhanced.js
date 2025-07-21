@@ -439,8 +439,8 @@ class PhantombusterService {
                 }),
 
                 // Configuración de resultados
-                numberOfResultsPerLaunch: options.numberOfResultsPerLaunch || 1000,
-                numberOfResultsPerSearch: options.numberOfResultsPerSearch || 1000,
+                numberOfResultsPerLaunch: options.numberOfResultsPerLaunch || 200,
+                numberOfResultsPerSearch: options.numberOfResultsPerSearch || 200,
 
                 // Categoría (People es la más común)
                 category: 'People',
@@ -1192,6 +1192,137 @@ app.get('/api/config', authenticateApiKey, (req, res) => {
 // ============================================================================
 // ENDPOINTS DE BÚSQUEDA (LinkedIn Search Export)
 // ============================================================================
+
+app.post('/api/search/simple-start', authenticateApiKey, async (req, res) => {
+    try {
+        const { sectors, roles, countries, companySizes, options = {} } = req.body;
+
+        if (!sectors || !roles || !countries) {
+            return res.status(400).json({
+                success: false,
+                message: 'sectors, roles y countries son requeridos',
+                error: 'MISSING_PARAMETERS'
+            });
+        }
+
+        console.log('🎯 Búsqueda con parámetros simples:', { sectors, roles, countries, companySizes });
+
+        // Mapear parámetros simples a formato PhantombusterService
+        const mappedParams = mapSimpleParams({ sectors, roles, countries, companySizes });
+
+        // Usar el servicio existente
+        const searchId = `search_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const searchUrls = phantombusterService.processSearchParameters(mappedParams);
+
+        const searchData = {
+            searchId,
+            containerId: null,
+            status: 'launching',
+            progress: 0,
+            createdAt: new Date().toISOString(),
+            completedAt: null,
+            searchParams: mappedParams,
+            originalParams: { sectors, roles, countries, companySizes },
+            options,
+            searchUrls,
+            results: []
+        };
+
+        searchStore.set(searchId, searchData);
+
+        // Lanzar agente
+        try {
+            const launchResult = await phantombusterService.launchSearchAgent(searchUrls, options);
+
+            searchData.containerId = launchResult.containerId;
+            searchData.status = 'running';
+            searchData.progress = 10;
+            searchStore.set(searchId, searchData);
+
+            res.json({
+                success: true,
+                message: 'Búsqueda simple iniciada exitosamente',
+                data: {
+                    searchId,
+                    containerId: launchResult.containerId,
+                    originalParams: { sectors, roles, countries, companySizes },
+                    mappedParams,
+                    searchUrls,
+                    status: 'running',
+                    progress: 10
+                }
+            });
+
+        } catch (launchError) {
+            searchData.status = 'failed';
+            searchData.error = launchError.message;
+            searchStore.set(searchId, searchData);
+            throw launchError;
+        }
+
+    } catch (error) {
+        console.error('❌ Error en búsqueda simple:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error en búsqueda simple',
+            error: error.message
+        });
+    }
+});
+
+// Función helper para mapear parámetros simples
+function mapSimpleParams({ sectors, roles, countries, companySizes }) {
+    // Mapeo de sectores a industry codes
+    const sectorMapping = {
+        'tech': 'technology',
+        'finance': 'financial-services',
+        'health': 'hospital-health-care',
+        'education': 'education-management',
+        'retail': 'retail'
+    };
+
+    // Mapeo de roles a job titles
+    const roleMapping = {
+        'ceo': 'Chief Executive Officer',
+        'cto': 'Chief Technology Officer',
+        'operations': 'Operations Manager',
+        'sales': 'Sales Manager',
+        'manager': 'Manager'
+    };
+
+    // Mapeo de países a nombres completos
+    const countryMapping = {
+        'fr': 'France',
+        'de': 'Germany',
+        'es': 'Spain',
+        'it': 'Italy',
+        'nl': 'Netherlands'
+    };
+
+    // Procesar parámetros
+    const sectorList = sectors.split(',').map(s => s.trim());
+    const roleList = roles.split(',').map(r => r.trim());
+    const countryList = countries.split(',').map(c => c.trim());
+    const companySizeList = companySizes ? companySizes.split(',').map(cs => cs.trim()) : [];
+
+    // Construir job_title con OR
+    const jobTitles = roleList.map(role => roleMapping[role] || role).join(' OR ');
+
+    // Construir location con OR
+    const locations = countryList.map(country => countryMapping[country] || country).join(' OR ');
+
+    // Mapear industry codes
+    const industryCodes = sectorList.map(sector => sectorMapping[sector] || sector);
+
+    return {
+        job_title: jobTitles,
+        location: locations,
+        industry_codes: industryCodes,
+        connection_degree: ["2", "3+"],
+        results_per_launch: 200,
+        total_results: 200
+    };
+}
 
 // Ruta de búsqueda real con Phantombuster
 app.post('/api/search/start', authenticateApiKey, async (req, res) => {
