@@ -2,10 +2,15 @@
   "name": "phantombuster-api",
   "version": "1.0.0",
   "description": "API REST para extracción de leads con Phantombuster LinkedIn Search Export",
-  "main": "server-enhanced.js",
+  "main": "server-refactored.js",
   "scripts": {
-    "start": "node server-enhanced.js",
-    "dev": "nodemon server-enhanced.js"
+    "start": "node server-refactored.js",
+    "dev": "nodemon server-refactored.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:unit": "jest --testPathPattern=unit",
+    "test:integration": "jest --testPathPattern=integration"
   },
   "keywords": [
     "phantombuster",
@@ -34,9 +39,29 @@
     "node-cron": "^3.0.3"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3",
+    "@types/jest": "^29.5.8"
   },
   "engines": {
     "node": ">=16.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "*.js",
+      "!node_modules/**",
+      "!coverage/**",
+      "!test/**"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 70,
+        "functions": 70,
+        "lines": 70,
+        "statements": 70
+      }
+    }
   }
 }
