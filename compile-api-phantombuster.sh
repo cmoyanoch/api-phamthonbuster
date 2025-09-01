@@ -37,22 +37,23 @@ print_error() {
 cleanup_docker_before() {
     print_status "🧹 Limpiando Docker antes de compilar..."
 
-    # Eliminar imágenes sin etiqueta
+    # Eliminar imágenes sin etiqueta (con timeout)
     local dangling_images=$(docker images -f "dangling=true" -q)
     if [ ! -z "$dangling_images" ]; then
         print_status "Eliminando imágenes sin etiqueta..."
-        docker rmi $dangling_images 2>/dev/null || print_warning "Algunas imágenes no se pudieron eliminar"
+        timeout 30 docker rmi $dangling_images 2>/dev/null || print_warning "⚠️ Algunas imágenes no se pudieron eliminar"
     fi
 
-    # Limpiar contenedores detenidos
+    # Limpiar contenedores detenidos (con timeout)
     local stopped=$(docker ps -a -q -f status=exited)
     if [ ! -z "$stopped" ]; then
-        docker rm $stopped 2>/dev/null || true
+        timeout 30 docker rm $stopped 2>/dev/null || print_warning "⚠️ Algunos contenedores no se pudieron eliminar"
     fi
 
-    # Limpiar sistema
-    docker volume prune -f >/dev/null 2>&1 || true
-    docker network prune -f >/dev/null 2>&1 || true
+    # Limpiar sistema (con timeout)
+    print_status "Limpiando volúmenes y redes..."
+    timeout 30 docker volume prune -f >/dev/null 2>&1 || print_warning "⚠️ Limpieza de volúmenes interrumpida"
+    timeout 30 docker network prune -f >/dev/null 2>&1 || print_warning "⚠️ Limpieza de redes interrumpida"
 
     print_success "✅ Sistema Docker limpio - listo para compilar"
 }
@@ -61,14 +62,15 @@ cleanup_docker_before() {
 cleanup_docker_after() {
     print_status "🧹 Limpieza post-compilación..."
 
-    # Eliminar imágenes sin etiqueta generadas
+    # Eliminar imágenes sin etiqueta generadas (con timeout)
     local dangling_images=$(docker images -f "dangling=true" -q)
     if [ ! -z "$dangling_images" ]; then
-        docker rmi $dangling_images 2>/dev/null || true
+        timeout 30 docker rmi $dangling_images 2>/dev/null || print_warning "⚠️ Algunas imágenes no se pudieron eliminar"
     fi
 
-    # Limpiar caché de build
-    docker builder prune -f >/dev/null 2>&1 || true
+    # Limpiar caché de build (con timeout y force)
+    print_status "Limpiando caché de build..."
+    timeout 60 docker builder prune -f --filter "until=24h" 2>/dev/null || print_warning "⚠️ Limpieza de caché interrumpida"
 
     print_success "✅ Limpieza post-compilación completada"
 }
@@ -301,6 +303,7 @@ show_help() {
     echo ""
     echo "Opciones:"
     echo "  build       - Compilar y reiniciar (default)"
+    echo "  build-nc    - Compilar sin limpieza (más rápido)"
     echo "  deps        - Solo instalar dependencias"
     echo "  restart     - Solo reiniciar servicio"
     echo "  check       - Solo verificar estado"
@@ -310,6 +313,7 @@ show_help() {
     echo ""
     echo "Ejemplos:"
     echo "  $0              - Compilación completa"
+    echo "  $0 build-nc     - Compilación sin limpieza"
     echo "  $0 deps         - Solo instalar dependencias"
     echo "  $0 restart      - Solo reiniciar"
     echo "  $0 check        - Solo verificar"
@@ -335,7 +339,23 @@ main() {
             check_connectivity
             show_final_info
 
-                print_success "¡Compilación completada exitosamente!"
+            print_success "¡Compilación completada exitosamente!"
+            ;;
+        "build-nc")
+            echo "====================================================="
+            echo "🚀 COMPILACIÓN API PHANTOMBUSTER (SIN LIMPIEZA)"
+            echo "====================================================="
+            echo ""
+
+            check_requirements
+            install_dependencies
+            build_api
+            restart_service
+            check_service
+            check_connectivity
+            show_final_info
+
+            print_success "¡Compilación completada exitosamente (sin limpieza)!"
             ;;
         "deps")
             echo "====================================================="
