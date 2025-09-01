@@ -11,7 +11,7 @@ const validateContainerId = (containerId) => {
       isValid: false,
       error: {
         success: false,
-        message: "Container ID inválido",
+        message: "ID de conteneur invalide",
         error: "INVALID_CONTAINER_ID",
         containerId,
         timestamp: new Date().toISOString(),
@@ -26,12 +26,12 @@ const validateContainerId = (containerId) => {
  */
 const mapPhantombusterError = (error) => {
   const errorMessage = error.message || '';
-  
+
   const errorMap = {
-    'Agent not found': { status: 404, message: 'Agente no encontrado o expirado' },
-    '400': { status: 400, message: 'Solicitud inválida al agente' },
-    '401': { status: 401, message: 'No autorizado para acceder al agente' },
-    '403': { status: 403, message: 'Acceso prohibido al agente' }
+    'Agent not found': { status: 404, message: 'Agent non trouvé ou expiré' },
+    '400': { status: 400, message: 'Demande invalide à l\'agent' },
+    '401': { status: 401, message: 'Non autorisé à accéder à l\'agent' },
+    '403': { status: 403, message: 'Accès interdit à l\'agent' }
   };
 
   // Buscar coincidencia en el mensaje de error
@@ -42,7 +42,7 @@ const mapPhantombusterError = (error) => {
   }
 
   // Error genérico por defecto
-  return { status: 500, message: 'Error obteniendo estado de búsqueda' };
+  return { status: 500, message: 'Erreur lors de l\'obtention de l\'état de recherche' };
 };
 
 /**
@@ -59,7 +59,7 @@ const createErrorResponse = (message, error, statusCode = 500, extra = {}) => ({
 /**
  * Crear respuesta de éxito estándar
  */
-const createSuccessResponse = (data, message = 'Operación exitosa', extra = {}) => ({
+const createSuccessResponse = (data, message = 'Opération réussie', extra = {}) => ({
   success: true,
   message,
   timestamp: new Date().toISOString(),

@@ -6,7 +6,7 @@ const authenticateApiKey = (req, res, next) => {
   if (!apiKey || apiKey !== process.env.API_KEY) {
     return res.status(401).json({
       success: false,
-      message: "API key inválida o faltante",
+      message: "Clé API invalide ou manquante",
       error: "UNAUTHORIZED",
     });
   }

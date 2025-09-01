@@ -124,7 +124,7 @@ const sequentialDistributionManager = new SequentialDistributionManager(
 app.get("/api/health", (req, res) => {
   res.json({
     success: true,
-    message: "API Phantombuster funcionando correctamente",
+    message: "API Phantombuster fonctionne correctement",
     timestamp: new Date().toISOString(),
     version: "2.0.0",
     uptime: process.uptime(),
@@ -152,7 +152,7 @@ app.get("/api/test-phantombuster", authenticateApiKey, async (req, res) => {
     logInfo("✅ Conectividad con Phantombuster exitosa");
     res.json({
       success: true,
-      message: "Conectividad con Phantombuster verificada",
+      message: "Connectivité avec Phantombuster vérifiée",
       status: response.status,
       data: response.data
     });
@@ -160,7 +160,7 @@ app.get("/api/test-phantombuster", authenticateApiKey, async (req, res) => {
     logError("❌ Error en conectividad con Phantombuster", error);
     res.status(500).json({
       success: false,
-      message: "Error en conectividad con Phantombuster",
+      message: "Erreur de connectivité avec Phantombuster",
       error: error.message,
       status: error.response?.status,
       data: error.response?.data

@@ -360,7 +360,7 @@ router.get('/status/:containerId', authenticateApiKey, async (req, res) => {
     } else {
       return res.status(404).json({
         success: false,
-        message: "No se pudo obtener el estado del Message Sender",
+        message: "Impossible d'obtenir l'état du Message Sender",
         error: "STATUS_NOT_AVAILABLE",
         containerId,
         timestamp: new Date().toISOString()
@@ -372,7 +372,7 @@ router.get('/status/:containerId', authenticateApiKey, async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Error interno al verificar estado de Message Sender",
+      message: "Erreur interne lors de la vérification de l'état du Message Sender",
       error: error.message,
       containerId: req.params.containerId,
       timestamp: new Date().toISOString()
@@ -390,7 +390,7 @@ router.get('/results/:containerId', authenticateApiKey, async (req, res) => {
     if (!containerId) {
       return res.status(400).json({
         success: false,
-        message: "containerId es requerido",
+        message: "containerId est requis",
         error: "MISSING_CONTAINER_ID",
         timestamp: new Date().toISOString()
       });
@@ -422,17 +422,17 @@ router.get('/results/:containerId', authenticateApiKey, async (req, res) => {
         },
         s3FileUrl: resultsResult.s3FileUrl || null,
         interpretation: resultsResult.interpretation || null,
-        message: "Resultados de Message Sender obtenidos exitosamente",
+        message: "Résultats du Message Sender obtenus avec succès",
         timestamp: new Date().toISOString()
       });
     } else {
       return res.status(404).json({
         success: false,
-        message: "No se encontraron resultados para este Message Sender",
+        message: "Aucun résultat trouvé pour ce Message Sender",
         error: "NO_RESULTS_AVAILABLE",
         containerId,
         timestamp: new Date().toISOString(),
-        note: "Verificar que la ejecución haya completado exitosamente"
+        note: "Vérifier que l'exécution se soit terminée avec succès"
       });
     }
 
@@ -441,7 +441,7 @@ router.get('/results/:containerId', authenticateApiKey, async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Error interno al obtener resultados de Message Sender",
+      message: "Erreur interne lors de l'obtention des résultats du Message Sender",
       error: error.message,
       containerId: req.params.containerId,
       timestamp: new Date().toISOString()

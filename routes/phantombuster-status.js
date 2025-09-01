@@ -26,7 +26,7 @@ router.get('/credits', authenticateApiKey, async (req, res) => {
     if (testResponse.status === 402) {
       return res.status(200).json({
         success: true,
-        message: 'Estado de créditos verificado',
+        message: 'État des crédits vérifié',
         timestamp: new Date().toISOString(),
         data: {
           status: 'no_credits_available',
@@ -35,17 +35,17 @@ router.get('/credits', authenticateApiKey, async (req, res) => {
           currentCredits: 0,
           remainingCredits: 0,
           recommendations: [
-            'Actualizar el plan de Phantombuster para obtener más créditos',
-            'Esperar hasta el próximo reset mensual (8 días)',
-            'Contactar soporte de Phantombuster para verificar el estado de la cuenta',
-            'Revisar el uso de otros agentes para optimizar recursos'
+            'Mettre à jour le plan Phantombuster pour obtenir plus de crédits',
+            'Attendre jusqu\'au prochain reset mensuel (8 jours)',
+            'Contacter le support Phantombuster pour vérifier l\'état du compte',
+            'Vérifier l\'utilisation d\'autres agents pour optimiser les ressources'
           ],
           nextSteps: [
-            'Verificar el estado de la cuenta en https://phantombuster.com/resources',
-            'Considerar actualizar a un plan superior',
-            'Pausar temporalmente las automatizaciones hasta tener créditos'
+            'Vérifier l\'état du compte sur https://phantombuster.com/resources',
+            'Envisager de passer à un plan supérieur',
+            'Mettre en pause temporairement les automatisations jusqu\'à avoir des crédits'
           ],
-          estimatedReset: '8 días (reset mensual automático)',
+          estimatedReset: '8 jours (reset mensuel automatique)',
           affectedAgents: [
             'LinkedIn Profile Visitor',
             'LinkedIn Autoconnect',
@@ -59,21 +59,21 @@ router.get('/credits', authenticateApiKey, async (req, res) => {
     if (!testResponse.ok) {
       return res.status(200).json({
         success: true,
-        message: 'Estado de créditos verificado',
+        message: 'État des crédits vérifié',
         timestamp: new Date().toISOString(),
         data: {
           status: 'configuration_error',
           errorCode: testResponse.status,
           issue: 'api_configuration_problem',
           recommendations: [
-            'Verificar la configuración de la API key de Phantombuster',
-            'Confirmar que los agentes están correctamente configurados',
-            'Revisar los logs del servidor para más detalles'
+            'Vérifier la configuration de la clé API Phantombuster',
+            'Confirmer que les agents sont correctement configurés',
+            'Vérifier les logs du serveur pour plus de détails'
           ],
           nextSteps: [
-            'Verificar PHANTOMBUSTER_API_KEY en la configuración',
-            'Confirmar que los agentes están activos en Phantombuster',
-            'Contactar soporte técnico si el problema persiste'
+            'Vérifier PHANTOMBUSTER_API_KEY dans la configuration',
+            'Confirmer que les agents sont actifs dans Phantombuster',
+            'Contacter le support technique si le problème persiste'
           ]
         }
       });
@@ -82,22 +82,22 @@ router.get('/credits', authenticateApiKey, async (req, res) => {
     // Si todo está bien, asumimos que hay créditos disponibles
     return res.status(200).json({
       success: true,
-      message: 'Estado de créditos verificado',
-      timestamp: new Date().toISOString(),
-      data: {
-        status: 'credits_available',
-        errorCode: null,
-        issue: null,
-        currentCredits: 'available',
-        remainingCredits: 'sufficient',
-        recommendations: [
-          'Los créditos están disponibles para ejecutar agentes',
-          'Puede proceder con las automatizaciones normalmente'
-        ],
-        nextSteps: [
-          'Continuar con las operaciones normales',
-          'Monitorear el uso de créditos regularmente'
-        ]
+              message: 'État des crédits vérifié',
+        timestamp: new Date().toISOString(),
+        data: {
+          status: 'credits_available',
+          errorCode: null,
+          issue: null,
+          currentCredits: 'available',
+          remainingCredits: 'sufficient',
+          recommendations: [
+            'Les crédits sont disponibles pour exécuter les agents',
+            'Vous pouvez procéder avec les automatisations normalement'
+          ],
+          nextSteps: [
+            'Continuer avec les opérations normales',
+            'Surveiller l\'utilisation des crédits régulièrement'
+          ]
       }
     });
 
@@ -106,15 +106,15 @@ router.get('/credits', authenticateApiKey, async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: 'Error verificando estado de créditos',
+      message: 'Erreur lors de la vérification de l\'état des crédits',
       error: error.message,
       timestamp: new Date().toISOString(),
       data: {
         status: 'error_checking_credits',
         recommendations: [
-          'Verificar la conectividad con Phantombuster',
-          'Revisar la configuración de red',
-          'Contactar soporte técnico si el problema persiste'
+          'Vérifier la connectivité avec Phantombuster',
+          'Vérifier la configuration réseau',
+          'Contacter le support technique si le problème persiste'
         ]
       }
     });
@@ -166,23 +166,23 @@ router.get('/status', authenticateApiKey, async (req, res) => {
         connectivityStatus = 'connected';
         creditsStatus = 'exhausted';
         hasCredits = false;
-        errorMessage = 'Créditos de ejecución agotados';
+        errorMessage = 'Crédits d\'exécution épuisés';
       } else if (testResponse.status === 401) {
         connectivityStatus = 'connected';
         creditsStatus = 'auth_error';
         hasCredits = false;
-        errorMessage = 'Error de autenticación con Phantombuster';
+        errorMessage = 'Erreur d\'authentification avec Phantombuster';
       } else {
         connectivityStatus = 'connected';
         creditsStatus = 'other_error';
         hasCredits = false;
-        errorMessage = `Error de API: ${testResponse.status}`;
+        errorMessage = `Erreur d'API: ${testResponse.status}`;
       }
     } catch (error) {
       connectivityStatus = 'disconnected';
       creditsStatus = 'unknown';
       hasCredits = false;
-      errorMessage = `Error de conectividad: ${error.message}`;
+              errorMessage = `Erreur de connectivité: ${error.message}`;
     }
 
     // Determinar el estado general
@@ -211,7 +211,7 @@ router.get('/status', authenticateApiKey, async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Estado de Phantombuster obtenido',
+      message: 'État de Phantombuster obtenu',
       data: enhancedStatusInfo
     });
 
@@ -220,7 +220,7 @@ router.get('/status', authenticateApiKey, async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: 'Error obteniendo estado de Phantombuster',
+      message: 'Erreur lors de l\'obtention de l\'état de Phantombuster',
       error: error.message,
       timestamp: new Date().toISOString(),
       data: {

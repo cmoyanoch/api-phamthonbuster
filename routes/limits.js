@@ -35,7 +35,7 @@ router.get('/daily', authenticateApiKey, async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Límites diarios obtenidos exitosamente',
+      message: 'Limites quotidiens obtenus avec succès',
       timestamp: new Date().toISOString(),
       data: {
         userId: limits.user_id,
@@ -105,7 +105,7 @@ router.post('/increment', authenticateApiKey, async (req, res) => {
     if (!agentType) {
       return res.status(400).json({
         success: false,
-        message: 'El tipo de agente es requerido',
+        message: 'Le type d\'agent est requis',
         validAgents: ['profileVisitor', 'searchAgent', 'autoconnect', 'messageSender']
       });
     }
@@ -204,7 +204,7 @@ router.get('/status', authenticateApiKey, async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Estado de límites obtenido exitosamente',
+      message: 'État des limites obtenu avec succès',
       timestamp: new Date().toISOString(),
       data: {
         overallStatus,

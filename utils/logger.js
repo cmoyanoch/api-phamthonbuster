@@ -42,6 +42,17 @@ if (canWriteLogs) {
   );
 }
 
+// Siempre agregar consola para logs en producción (sin archivos)
+transports.push(new winston.transports.Console({
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.colorize(),
+    winston.format.printf(({ timestamp, level, message, service, ...meta }) => {
+      return `${timestamp} [${service || 'api'}] ${level}: ${message} ${Object.keys(meta).length ? JSON.stringify(meta) : ''}`;
+    })
+  )
+}));
+
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: winston.format.combine(
@@ -50,18 +61,9 @@ const logger = winston.createLogger({
     winston.format.json()
   ),
   defaultMeta: { service: 'phantombuster-api' },
-  transports: transports
+  transports: transports,
+  silent: false // Asegurar que no esté silenciado
 });
-
-// En desarrollo, también mostrar en consola
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.combine(
-      winston.format.colorize(),
-      winston.format.simple()
-    )
-  }));
-}
 
 /**
  * Wrapper functions para mantener compatibilidad con console.log
