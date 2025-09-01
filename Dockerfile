@@ -24,15 +24,16 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Copiar código de la aplicación
 COPY . .
 
-# Crear directorio de logs
-RUN mkdir -p logs
-
-# Crear usuario no-root
+# Crear usuario no-root primero
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Cambiar permisos
-RUN chown -R nodejs:nodejs /app
+# Crear directorio de logs como root y luego cambiar permisos
+RUN mkdir -p logs && \
+    chown -R nodejs:nodejs /app && \
+    chmod -R 755 /app && \
+    chmod 775 logs
+
 USER nodejs
 
 # Exponer puerto

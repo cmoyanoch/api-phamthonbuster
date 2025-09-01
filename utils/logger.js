@@ -7,11 +7,41 @@ const path = require('path');
 
 // Asegurar que existe el directorio de logs
 const logDir = path.join(__dirname, '../logs');
-if (!fs.existsSync(logDir)) {
-  fs.mkdirSync(logDir, { recursive: true });
+let canWriteLogs = true;
+
+try {
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true, mode: 0o775 });
+  }
+  // Verificar que podemos escribir en el directorio
+  fs.accessSync(logDir, fs.constants.W_OK);
+} catch (error) {
+  canWriteLogs = false;
+  console.warn('No se puede usar directorio de logs, usando solo console:', error.message);
 }
 
-// Configurar Winston
+// Configurar Winston con manejo de errores
+const transports = [];
+
+// Solo agregar transportes de archivo si podemos escribir logs
+if (canWriteLogs) {
+  transports.push(
+    // Escribir logs de error a archivo
+    new winston.transports.File({
+      filename: path.join(logDir, 'error.log'),
+      level: 'error',
+      maxsize: 5242880, // 5MB
+      maxFiles: 5,
+    }),
+    // Ecribir logs combinados a archivo
+    new winston.transports.File({
+      filename: path.join(logDir, 'combined.log'),
+      maxsize: 5242880, // 5MB
+      maxFiles: 5,
+    })
+  );
+}
+
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: winston.format.combine(
@@ -20,21 +50,7 @@ const logger = winston.createLogger({
     winston.format.json()
   ),
   defaultMeta: { service: 'phantombuster-api' },
-  transports: [
-    // Escribir logs de error a archivo
-    new winston.transports.File({
-      filename: path.join(logDir, 'error.log'),
-      level: 'error',
-      maxsize: 5242880, // 5MB
-      maxFiles: 5,
-    }),
-    // Escribir logs combinados a archivo
-    new winston.transports.File({
-      filename: path.join(logDir, 'combined.log'),
-      maxsize: 5242880, // 5MB
-      maxFiles: 5,
-    })
-  ]
+  transports: transports
 });
 
 // En desarrollo, también mostrar en consola
@@ -55,10 +71,10 @@ const logInfo = (message, meta = {}) => {
 };
 
 const logError = (message, error = null, meta = {}) => {
-  logger.error(message, { 
+  logger.error(message, {
     error: error instanceof Error ? error.message : error,
     stack: error instanceof Error ? error.stack : null,
-    ...meta 
+    ...meta
   });
 };
 
