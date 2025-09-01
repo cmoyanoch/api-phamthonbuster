@@ -155,28 +155,7 @@ build_api() {
     fi
 }
 
-# Función para ejecutar migración de base de datos
-run_migration() {
-    print_status "🗄️ Verificando migración de base de datos..."
 
-    # Verificar si las tablas ya existen (con mejor manejo de errores)
-    if docker compose exec n8n_postgres psql -U n8n_user -d n8n_db -c "\dt phantombuster.searches" 2>/dev/null | grep -q "searches"; then
-        print_success "✅ Tablas ya existen, saltando migración"
-        return 0
-    elif docker compose exec n8n_postgres psql -U n8n_user -d n8n_db -c "\dt" 2>/dev/null | grep -q "phantombuster"; then
-        print_success "✅ Esquema phantombuster ya existe, saltando migración"
-        return 0
-    else
-        print_status "📋 Tablas no encontradas, ejecutando migración..."
-
-        # Ejecutar migración dentro del contenedor
-        if docker compose exec phantombuster-api node database-service.js; then
-            print_success "✅ Migración de base de datos completada"
-        else
-            print_warning "⚠️ Error en migración de base de datos (puede ser normal si ya existe)"
-        fi
-    fi
-}
 
 # Función para reiniciar el servicio
 restart_service() {
@@ -323,7 +302,6 @@ show_help() {
     echo "Opciones:"
     echo "  build       - Compilar y reiniciar (default)"
     echo "  deps        - Solo instalar dependencias"
-    echo "  migrate     - Solo ejecutar migración de BD"
     echo "  restart     - Solo reiniciar servicio"
     echo "  check       - Solo verificar estado"
     echo "  connectivity- Verificar conectividad completa"
@@ -333,7 +311,6 @@ show_help() {
     echo "Ejemplos:"
     echo "  $0              - Compilación completa"
     echo "  $0 deps         - Solo instalar dependencias"
-    echo "  $0 migrate      - Solo migración de BD"
     echo "  $0 restart      - Solo reiniciar"
     echo "  $0 check        - Solo verificar"
     echo "  $0 connectivity - Verificar conectividad completa"
@@ -354,13 +331,11 @@ main() {
             build_api
             cleanup_docker_after
             restart_service
-            run_migration
             check_service
             check_connectivity
             show_final_info
 
-            print_success "¡Compilación completada exitosamente!"
-            print_status "📊 Persistencia de datos habilitada"
+                print_success "¡Compilación completada exitosamente!"
             ;;
         "deps")
             echo "====================================================="
@@ -371,16 +346,6 @@ main() {
             check_requirements
             install_dependencies
             print_success "¡Dependencias instaladas exitosamente!"
-            ;;
-        "migrate")
-            echo "====================================================="
-            echo "🗄️ MIGRACIÓN BASE DE DATOS"
-            echo "====================================================="
-            echo ""
-
-            check_requirements
-            run_migration
-            print_success "¡Migración completada!"
             ;;
         "restart")
             echo "====================================================="
