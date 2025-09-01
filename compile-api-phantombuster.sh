@@ -33,6 +33,46 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Función para limpiar Docker antes de compilar
+cleanup_docker_before() {
+    print_status "🧹 Limpiando Docker antes de compilar..."
+    
+    # Eliminar imágenes sin etiqueta
+    local dangling_images=$(docker images -f "dangling=true" -q)
+    if [ ! -z "$dangling_images" ]; then
+        print_status "Eliminando imágenes sin etiqueta..."
+        docker rmi $dangling_images 2>/dev/null || print_warning "Algunas imágenes no se pudieron eliminar"
+    fi
+    
+    # Limpiar contenedores detenidos
+    local stopped=$(docker ps -a -q -f status=exited)
+    if [ ! -z "$stopped" ]; then
+        docker rm $stopped 2>/dev/null || true
+    fi
+    
+    # Limpiar sistema
+    docker volume prune -f >/dev/null 2>&1 || true
+    docker network prune -f >/dev/null 2>&1 || true
+    
+    print_success "✅ Sistema Docker limpio - listo para compilar"
+}
+
+# Función para limpiar Docker después de compilar
+cleanup_docker_after() {
+    print_status "🧹 Limpieza post-compilación..."
+    
+    # Eliminar imágenes sin etiqueta generadas
+    local dangling_images=$(docker images -f "dangling=true" -q)
+    if [ ! -z "$dangling_images" ]; then
+        docker rmi $dangling_images 2>/dev/null || true
+    fi
+    
+    # Limpiar caché de build
+    docker builder prune -f >/dev/null 2>&1 || true
+    
+    print_success "✅ Limpieza post-compilación completada"
+}
+
 # Función para verificar requisitos
 check_requirements() {
     print_status "Verificando requisitos del sistema..."
@@ -204,7 +244,9 @@ main() {
             echo ""
 
             check_requirements
+            cleanup_docker_before
             build_api
+            cleanup_docker_after
             restart_service
             run_migration
             check_service
