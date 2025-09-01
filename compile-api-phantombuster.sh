@@ -4,7 +4,7 @@
 # SCRIPT DE COMPILACIÓN - API PHANTOMBUSTER
 # =====================================================
 # Este script compila y reinicia la API de Phantombuster
-# Incluye: compilación, reinicio y verificación
+# Incluye: instalación de dependencias, compilación, reinicio y verificación
 # =====================================================
 
 set -e  # Salir si hay algún error
@@ -36,40 +36,40 @@ print_error() {
 # Función para limpiar Docker antes de compilar
 cleanup_docker_before() {
     print_status "🧹 Limpiando Docker antes de compilar..."
-    
+
     # Eliminar imágenes sin etiqueta
     local dangling_images=$(docker images -f "dangling=true" -q)
     if [ ! -z "$dangling_images" ]; then
         print_status "Eliminando imágenes sin etiqueta..."
         docker rmi $dangling_images 2>/dev/null || print_warning "Algunas imágenes no se pudieron eliminar"
     fi
-    
+
     # Limpiar contenedores detenidos
     local stopped=$(docker ps -a -q -f status=exited)
     if [ ! -z "$stopped" ]; then
         docker rm $stopped 2>/dev/null || true
     fi
-    
+
     # Limpiar sistema
     docker volume prune -f >/dev/null 2>&1 || true
     docker network prune -f >/dev/null 2>&1 || true
-    
+
     print_success "✅ Sistema Docker limpio - listo para compilar"
 }
 
 # Función para limpiar Docker después de compilar
 cleanup_docker_after() {
     print_status "🧹 Limpieza post-compilación..."
-    
+
     # Eliminar imágenes sin etiqueta generadas
     local dangling_images=$(docker images -f "dangling=true" -q)
     if [ ! -z "$dangling_images" ]; then
         docker rmi $dangling_images 2>/dev/null || true
     fi
-    
+
     # Limpiar caché de build
     docker builder prune -f >/dev/null 2>&1 || true
-    
+
     print_success "✅ Limpieza post-compilación completada"
 }
 
@@ -104,87 +104,179 @@ check_requirements() {
     print_success "Todos los requisitos están cumplidos"
 }
 
+# Función para instalar dependencias faltantes
+install_dependencies() {
+    print_status "📦 Verificando e instalando dependencias..."
+
+    cd api-phamthonbuster
+
+    # Verificar si winston está instalado
+    if ! npm list winston >/dev/null 2>&1; then
+        print_status "Instalando winston (sistema de logging)..."
+        npm install winston
+        print_success "✅ winston instalado"
+    else
+        print_success "✅ winston ya está instalado"
+    fi
+
+    # Verificar si cheerio está instalado
+    if ! npm list cheerio >/dev/null 2>&1; then
+        print_status "Instalando cheerio (versión compatible con Node.js 18)..."
+        npm install cheerio@1.0.0-rc.12
+        print_success "✅ cheerio instalado"
+    else
+        print_success "✅ cheerio ya está instalado"
+    fi
+
+    # Verificar otras dependencias críticas
+    local critical_deps=("express" "axios" "pg" "redis" "cors" "helmet")
+    for dep in "${critical_deps[@]}"; do
+        if ! npm list "$dep" >/dev/null 2>&1; then
+            print_warning "⚠️  Dependencia faltante: $dep"
+            print_status "Instalando $dep..."
+            npm install "$dep"
+        fi
+    done
+
+    cd ..
+    print_success "✅ Todas las dependencias verificadas e instaladas"
+}
+
 # Función para compilar la API
 build_api() {
-    print_status "Compilando API Phantombuster..."
+    print_status "🔨 Compilando API Phantombuster..."
 
     # Compilar sin caché para asegurar cambios
     if docker compose build phantombuster-api --no-cache; then
-        print_success "API Phantombuster compilada exitosamente"
+        print_success "✅ API Phantombuster compilada exitosamente"
     else
-        print_error "Error en la compilación de la API"
+        print_error "❌ Error en la compilación de la API"
         exit 1
     fi
 }
 
 # Función para ejecutar migración de base de datos
 run_migration() {
-    print_status "Verificando migración de base de datos..."
+    print_status "🗄️ Verificando migración de base de datos..."
 
     # Verificar si las tablas ya existen (con mejor manejo de errores)
     if docker compose exec n8n_postgres psql -U n8n_user -d n8n_db -c "\dt phantombuster.searches" 2>/dev/null | grep -q "searches"; then
-        print_success "Tablas ya existen, saltando migración"
+        print_success "✅ Tablas ya existen, saltando migración"
         return 0
     elif docker compose exec n8n_postgres psql -U n8n_user -d n8n_db -c "\dt" 2>/dev/null | grep -q "phantombuster"; then
-        print_success "Esquema phantombuster ya existe, saltando migración"
+        print_success "✅ Esquema phantombuster ya existe, saltando migración"
         return 0
     else
-        print_status "Tablas no encontradas, ejecutando migración..."
+        print_status "📋 Tablas no encontradas, ejecutando migración..."
 
         # Ejecutar migración dentro del contenedor
         if docker compose exec phantombuster-api node database-service.js; then
-            print_success "Migración de base de datos completada"
+            print_success "✅ Migración de base de datos completada"
         else
-            print_warning "Error en migración de base de datos (puede ser normal si ya existe)"
+            print_warning "⚠️ Error en migración de base de datos (puede ser normal si ya existe)"
         fi
     fi
 }
 
 # Función para reiniciar el servicio
 restart_service() {
-    print_status "Reiniciando servicio phantombuster-api..."
+    print_status "🔄 Reiniciando servicio phantombuster-api..."
 
     if docker compose restart phantombuster-api; then
-        print_success "Servicio reiniciado exitosamente"
+        print_success "✅ Servicio reiniciado exitosamente"
     else
-        print_error "Error al reiniciar el servicio"
+        print_error "❌ Error al reiniciar el servicio"
         exit 1
     fi
 }
 
 # Función para verificar el servicio
 check_service() {
-    print_status "Verificando estado del servicio..."
+    print_status "🔍 Verificando estado del servicio..."
 
     # Esperar a que el servicio se inicie
-    sleep 10
+    print_status "⏳ Esperando 15 segundos para que el servicio se inicie completamente..."
+    sleep 15
 
     # Verificar estado del contenedor
     echo ""
-    print_status "Estado del contenedor:"
+    print_status "📊 Estado del contenedor:"
     docker compose ps phantombuster-api
 
     # Verificar health check
     echo ""
-    print_status "Verificando health check..."
-    if curl -f http://localhost:3001/health >/dev/null 2>&1; then
-        print_success "✅ API Phantombuster está respondiendo correctamente"
+    print_status "🏥 Verificando health check..."
 
-        # Mostrar respuesta del health check
-        echo ""
-        print_status "Respuesta del health check:"
-        curl -s http://localhost:3001/health | jq . 2>/dev/null || curl -s http://localhost:3001/health
-    else
-        print_warning "⚠️  API no responde aún (puede estar iniciando)"
+    # Intentar múltiples endpoints
+    local endpoints=("/health" "/api/health" "/status")
+    local api_responding=false
+
+    for endpoint in "${endpoints[@]}"; do
+        if curl -f http://localhost:3001$endpoint >/dev/null 2>&1; then
+            print_success "✅ API Phantombuster está respondiendo en $endpoint"
+            api_responding=true
+
+            # Mostrar respuesta del health check
+            echo ""
+            print_status "📄 Respuesta del health check:"
+            curl -s http://localhost:3001$endpoint | jq . 2>/dev/null || curl -s http://localhost:3001$endpoint
+            break
+        fi
+    done
+
+    if [ "$api_responding" = false ]; then
+        print_warning "⚠️ API no responde aún (puede estar iniciando)"
+        print_status "📋 Verificando logs del contenedor..."
+        docker compose logs phantombuster-api --tail=10
     fi
 }
 
 # Función para mostrar logs
 show_logs() {
-    print_status "Mostrando logs recientes..."
+    print_status "📋 Mostrando logs recientes..."
 
     echo ""
     docker compose logs phantombuster-api --tail=20
+}
+
+# Función para verificar conectividad completa
+check_connectivity() {
+    print_status "🌐 Verificando conectividad completa del sistema..."
+
+    echo ""
+    print_status "📊 Estado de todos los servicios:"
+    docker compose ps
+
+    echo ""
+    print_status "🔗 Verificando conectividad de servicios:"
+
+    # Verificar WebApp
+    if curl -s -o /dev/null -w "WebApp: %{http_code}\n" http://localhost:3000; then
+        print_success "✅ WebApp respondiendo"
+    else
+        print_warning "⚠️ WebApp no responde"
+    fi
+
+    # Verificar API
+    if curl -s -o /dev/null -w "API: %{http_code}\n" http://localhost:3001/api/health; then
+        print_success "✅ API respondiendo"
+    else
+        print_warning "⚠️ API no responde"
+    fi
+
+    # Verificar Redis
+    if docker compose exec redis redis-cli ping >/dev/null 2>&1; then
+        print_success "✅ Redis funcionando"
+    else
+        print_warning "⚠️ Redis no responde"
+    fi
+
+    # Verificar PostgreSQL
+    if docker compose exec n8n_postgres pg_isready -U n8n_user >/dev/null 2>&1; then
+        print_success "✅ PostgreSQL funcionando"
+    else
+        print_warning "⚠️ PostgreSQL no responde"
+    fi
 }
 
 # Función para mostrar información final
@@ -194,23 +286,32 @@ show_final_info() {
     print_success "🎉 COMPILACIÓN API PHANTOMBUSTER COMPLETADA"
     echo "====================================================="
     echo ""
-    echo "📱 Servicio disponible:"
+    echo "📱 Servicios disponibles:"
+    echo "   • WebApp Next.js: http://localhost:3000"
     echo "   • API Phantombuster: http://localhost:3001"
+    echo "   • n8n Workflows: http://localhost:5678"
+    echo "   • PgAdmin: http://localhost:8080"
     echo ""
     echo "🔧 Comandos útiles:"
-    echo "   • Ver logs: docker compose logs phantombuster-api -f"
-    echo "   • Reiniciar: docker compose restart phantombuster-api"
-    echo "   • Estado: docker compose ps phantombuster-api"
-    echo "   • Health check: curl http://localhost:3001/health"
+    echo "   • Ver logs API: docker compose logs phantombuster-api -f"
+    echo "   • Reiniciar API: docker compose restart phantombuster-api"
+    echo "   • Estado completo: docker compose ps"
+    echo "   • Health check API: curl http://localhost:3001/api/health"
     echo ""
     echo "📊 Endpoints principales:"
-    echo "   • Health: GET /health"
+    echo "   • Health: GET /api/health"
     echo "   • Search: POST /api/search/start"
     echo "   • Profile Visitor: POST /api/profile-visitor/visit-single"
+    echo "   • Domain Scraper: POST /api/domain-scraper/extract-address"
     echo "   • Config: GET /api/config"
     echo ""
     echo "🔒 Autenticación:"
     echo "   • Header: X-API-Key: dev-api-key-12345"
+    echo ""
+    echo "📦 Dependencias instaladas:"
+    echo "   • winston (logging)"
+    echo "   • cheerio (web scraping)"
+    echo "   • express, axios, pg, redis, cors, helmet"
     echo ""
     echo "====================================================="
 }
@@ -220,18 +321,22 @@ show_help() {
     echo "Uso: $0 [OPCIÓN]"
     echo ""
     echo "Opciones:"
-    echo "  build     - Compilar y reiniciar (default)"
-    echo "  migrate   - Solo ejecutar migración de BD"
-    echo "  restart   - Solo reiniciar servicio"
-    echo "  check     - Solo verificar estado"
-    echo "  logs      - Mostrar logs"
-    echo "  help      - Mostrar esta ayuda"
+    echo "  build       - Compilar y reiniciar (default)"
+    echo "  deps        - Solo instalar dependencias"
+    echo "  migrate     - Solo ejecutar migración de BD"
+    echo "  restart     - Solo reiniciar servicio"
+    echo "  check       - Solo verificar estado"
+    echo "  connectivity- Verificar conectividad completa"
+    echo "  logs        - Mostrar logs"
+    echo "  help        - Mostrar esta ayuda"
     echo ""
     echo "Ejemplos:"
-    echo "  $0         - Compilación completa"
-    echo "  $0 migrate - Solo migración de BD"
-    echo "  $0 restart - Solo reiniciar"
-    echo "  $0 check   - Solo verificar"
+    echo "  $0              - Compilación completa"
+    echo "  $0 deps         - Solo instalar dependencias"
+    echo "  $0 migrate      - Solo migración de BD"
+    echo "  $0 restart      - Solo reiniciar"
+    echo "  $0 check        - Solo verificar"
+    echo "  $0 connectivity - Verificar conectividad completa"
 }
 
 # Función principal
@@ -244,16 +349,28 @@ main() {
             echo ""
 
             check_requirements
+            install_dependencies
             cleanup_docker_before
             build_api
             cleanup_docker_after
             restart_service
             run_migration
             check_service
+            check_connectivity
             show_final_info
 
             print_success "¡Compilación completada exitosamente!"
             print_status "📊 Persistencia de datos habilitada"
+            ;;
+        "deps")
+            echo "====================================================="
+            echo "📦 INSTALACIÓN DE DEPENDENCIAS"
+            echo "====================================================="
+            echo ""
+
+            check_requirements
+            install_dependencies
+            print_success "¡Dependencias instaladas exitosamente!"
             ;;
         "migrate")
             echo "====================================================="
@@ -289,6 +406,18 @@ main() {
             show_logs
 
             print_success "¡Verificación completada!"
+            ;;
+        "connectivity")
+            echo "====================================================="
+            echo "🌐 VERIFICACIÓN DE CONECTIVIDAD COMPLETA"
+            echo "====================================================="
+            echo ""
+
+            check_requirements
+            check_connectivity
+            show_logs
+
+            print_success "¡Verificación de conectividad completada!"
             ;;
         "logs")
             echo "====================================================="
