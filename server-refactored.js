@@ -12,11 +12,25 @@ const PhantombusterService = require("./services/PhantombusterService");
 const LinkedInProfileVisitorService = require("./services/LinkedInProfileVisitorService");
 const DatabaseService = require("./database-service");
 const LinkedInCookieManager = require("./cookie-manager");
-const { mapSimpleParams } = require("./utils/parameterMapper");
+
+// Importar rutas específicas
+const autoconnectRoutes = require("./routes/autoconnect");
+const messageSenderRoutes = require("./routes/message-sender");
+const autoconnectMonitoringRoutes = require("./routes/autoconnect-monitoring");
+const domainScraperRoutes = require("./routes/domain-scraper");
+const axonautRoutes = require("./routes/axonaut");
+
 const metricsCollector = require("./monitoring/metrics");
 const SequentialDistributionManager = require("./services/SequentialDistributionManager");
 const containerStatusMonitor = require("./services/ContainerStatusMonitor");
+const KnownErrorsService = require("./services/KnownErrorsService");
+const PhantombusterErrorParser = require("./services/PhantombusterErrorParser");
+const AutoconnectResponseMonitor = require("./services/AutoconnectResponseMonitor");
 const axios = require("axios"); // Agregado axios para acceso a URLs de S3
+
+// Importar utilidades de optimización
+const { logInfo, logError, logWarn, logEndpoint } = require('./utils/logger');
+const { validateContainerId, mapPhantombusterError, createErrorResponse, createSuccessResponse, createResultsResponse } = require('./utils/responseHelpers');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -44,10 +58,10 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Registro de logs
+// Registro de logs optimizado
 app.use(morgan("combined"));
 
-// Middleware de métricas
+// Middleware de métricas y logging optimizado
 app.use((req, res, next) => {
   const startTime = Date.now();
 
@@ -59,6 +73,11 @@ app.use((req, res, next) => {
       res.statusCode,
       responseTime
     );
+
+    // Log solo requests importantes (errores o endpoints críticos)
+    if (res.statusCode >= 400 || req.path.includes('/search/') || req.path.includes('/health')) {
+      logEndpoint(req.method, req.path, res.statusCode, responseTime);
+    }
   });
 
   next();
@@ -72,6 +91,9 @@ const dbService = new DatabaseService();
 const phantombusterService = new PhantombusterService();
 const profileVisitorService = new LinkedInProfileVisitorService();
 const cookieManager = new LinkedInCookieManager();
+const knownErrorsService = new KnownErrorsService();
+const phantombusterErrorParser = new PhantombusterErrorParser();
+const autoconnectResponseMonitor = new AutoconnectResponseMonitor(phantombusterService, dbService);
 const sequentialDistributionManager = new SequentialDistributionManager(
   dbService,
   phantombusterService
@@ -81,10 +103,17 @@ const sequentialDistributionManager = new SequentialDistributionManager(
 (async () => {
   try {
     await dbService.initialize();
-    console.log("✅ Persistencia de datos habilitada");
+
+    // Asignar servicios a app.locals para acceso global
+    app.locals.dbService = dbService;
+    app.locals.phantombusterService = phantombusterService;
+    app.locals.profileVisitorService = profileVisitorService;
+
+    logInfo("✅ Persistencia de datos habilitada");
+    logInfo("✅ Servicios asignados a app.locals");
   } catch (error) {
-    console.error("❌ Error inicializando persistencia:", error.message);
-    console.log("⚠️ La API funcionará con almacenamiento en memoria");
+    logError("❌ Error inicializando persistencia", error);
+    logWarn("⚠️ La API funcionará con almacenamiento en memoria");
   }
 })();
 
@@ -104,6 +133,39 @@ app.get("/api/health", (req, res) => {
 
 app.get("/api/health/live", (req, res) => {
   res.status(200).send("OK");
+});
+
+// Endpoint para probar conectividad con Phantombuster
+app.get("/api/test-phantombuster", authenticateApiKey, async (req, res) => {
+  try {
+    logInfo("🧪 Probando conectividad con Phantombuster...");
+
+    // Hacer una petición simple a Phantombuster para verificar conectividad
+    const response = await axios.get(`${phantombusterService.baseUrl}/agents/fetch-all`, {
+      headers: {
+        "X-Phantombuster-Key": phantombusterService.apiKey,
+        "Content-Type": "application/json",
+      },
+      timeout: 10000, // 10 segundos
+    });
+
+    logInfo("✅ Conectividad con Phantombuster exitosa");
+    res.json({
+      success: true,
+      message: "Conectividad con Phantombuster verificada",
+      status: response.status,
+      data: response.data
+    });
+  } catch (error) {
+    logError("❌ Error en conectividad con Phantombuster", error);
+    res.status(500).json({
+      success: false,
+      message: "Error en conectividad con Phantombuster",
+      error: error.message,
+      status: error.response?.status,
+      data: error.response?.data
+    });
+  }
 });
 
 app.get("/api/config", authenticateApiKey, (req, res) => {
@@ -135,6 +197,213 @@ app.get("/api/config", authenticateApiKey, (req, res) => {
       },
     },
   });
+});
+
+// ============================================================================
+// ENDPOINTS DE TRIGGERS DE LOOP COMPLETION
+// ============================================================================
+
+app.get("/api/loop-completion/check", authenticateApiKey, async (req, res) => {
+  try {
+    console.log("🔍 Verificando completion de loops...");
+
+    const result = await dbService.pgPool.query(
+      "SELECT check_and_notify_loop_completion() as result"
+    );
+
+    const message = result.rows[0]?.result || "Sin resultado";
+
+    res.json({
+      success: true,
+      message: "Verificación de loop completion ejecutada",
+      result: message,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(`❌ Error verificando loop completion: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: "Error verificando loop completion",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+app.get("/api/loop-completion/session/:sessionId", authenticateApiKey, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    console.log(`🔍 Verificando completion de sesión: ${sessionId}`);
+
+    const result = await dbService.pgPool.query(
+      "SELECT check_session_completion($1) as details",
+      [sessionId]
+    );
+
+    const sessionDetails = result.rows[0]?.details || {};
+
+    res.json({
+      success: true,
+      message: `Estado de sesión ${sessionId}`,
+      sessionDetails,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(`❌ Error verificando sesión ${req.params.sessionId}: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: "Error verificando estado de sesión",
+      error: error.message,
+      sessionId: req.params.sessionId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+app.post("/api/loop-completion/manual-trigger", authenticateApiKey, async (req, res) => {
+  try {
+    const { sessionId, force = false } = req.body;
+
+    console.log(`🚀 Trigger manual para sesión: ${sessionId}, force: ${force}`);
+
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        message: "sessionId es requerido",
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Verificar estado actual de la sesión
+    const sessionCheck = await dbService.pgPool.query(
+      "SELECT check_session_completion($1) as details",
+      [sessionId]
+    );
+
+    const sessionDetails = sessionCheck.rows[0]?.details || {};
+
+    // Si force=true o la sesión está completa, disparar notificación
+    if (force || sessionDetails.is_complete) {
+      const webhookPayload = {
+        event: 'manual_loop_completion_trigger',
+        table: 'phantombuster.sequential_url_states',
+        timestamp: new Date().toISOString(),
+        session_id: sessionId,
+        session_details: sessionDetails,
+        triggered_by: 'manual_api_call',
+        force_triggered: force,
+        message: `Manual trigger para sesión: ${sessionId}`
+      };
+
+      // Enviar notificación manual
+      await dbService.pgPool.query(
+        "SELECT pg_notify('loop_completion_alert', $1)",
+        [JSON.stringify(webhookPayload)]
+      );
+
+      res.json({
+        success: true,
+        message: `Trigger manual enviado para sesión ${sessionId}`,
+        sessionDetails,
+        webhookPayload,
+        timestamp: new Date().toISOString(),
+      });
+    } else {
+      res.json({
+        success: false,
+        message: `Sesión ${sessionId} no está completa. Use force=true para enviar de todas formas`,
+        sessionDetails,
+        suggestion: "POST /api/loop-completion/manual-trigger con { sessionId, force: true }",
+        timestamp: new Date().toISOString(),
+      });
+    }
+  } catch (error) {
+    console.error(`❌ Error en trigger manual: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: "Error ejecutando trigger manual",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// ============================================================================
+// ENDPOINTS DE ERRORES CONOCIDOS
+// ============================================================================
+
+app.get("/api/known-errors", authenticateApiKey, async (req, res) => {
+  try {
+    const { type, containerId, limit = 50 } = req.query;
+
+    let errors = [];
+
+    if (containerId) {
+      const error = await knownErrorsService.findKnownErrorByContainerId(containerId);
+      errors = error ? [error] : [];
+    } else if (type) {
+      errors = await knownErrorsService.findKnownErrorsByType(type);
+    } else {
+      // Obtener estadísticas generales
+      const stats = await knownErrorsService.getErrorStatistics();
+      return res.json({
+        success: true,
+        message: "Estadísticas de errores conocidos",
+        statistics: stats,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Errores conocidos encontrados",
+      errors: errors.slice(0, parseInt(limit)),
+      total: errors.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(`❌ Error consultando errores conocidos: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: "Error consultando errores conocidos",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+app.post("/api/known-errors/:containerId/resolve", authenticateApiKey, async (req, res) => {
+  try {
+    const { containerId } = req.params;
+    const { resolutionNotes } = req.body;
+
+    const result = await knownErrorsService.markErrorAsResolved(containerId, resolutionNotes);
+
+    if (result) {
+      res.json({
+        success: true,
+        message: "Error marcado como resuelto",
+        result,
+        timestamp: new Date().toISOString(),
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: "Error no encontrado",
+        containerId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  } catch (error) {
+    console.error(`❌ Error marcando error como resuelto: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: "Error marcando error como resuelto",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
 });
 
 // ============================================================================
@@ -269,11 +538,20 @@ app.post("/api/search", authenticateApiKey, async (req, res) => {
       // NUEVOS PARÁMETROS PARA SECUENCIA
       campaignId,
       urlsWithPriorities = [],
-      totalLeadsLimit = 2000,
-      useSequentialDistribution = false,
+      useSequentialDistribution,
     } = req.body;
 
-    let searchType, searchData, launchResult;
+    // Log básico para debugging
+    console.log(`📥 Request recibido - useSequentialDistribution: ${useSequentialDistribution}`);
+
+    // Extraer totalLeadsLimit de urlsWithPriorities si está disponible
+    let totalLeadsLimit = 2500; // valor por defecto
+    if (urlsWithPriorities && urlsWithPriorities.length > 0 && urlsWithPriorities[0].totalLeadsLimit) {
+      totalLeadsLimit = parseInt(urlsWithPriorities[0].totalLeadsLimit);
+      console.log(`📊 TotalLeadsLimit extraído de urlsWithPriorities: ${totalLeadsLimit}`);
+    }
+
+    let searchData, launchResult;
 
     // SI ES DISTRIBUCIÓN SECUENCIAL
     if (useSequentialDistribution) {
@@ -337,7 +615,6 @@ app.post("/api/search", authenticateApiKey, async (req, res) => {
       }
 
       console.log(`🔄 Iniciando búsqueda con distribución secuencial`);
-          // Logs de debug removidos para producción
 
       try {
         // Inicializar o recuperar secuencia
@@ -405,242 +682,133 @@ app.post("/api/search", authenticateApiKey, async (req, res) => {
       }
     }
 
-    // LÓGICA EXISTENTE PARA BÚSQUEDA SIMPLE
-    // DETERMINAR TIPO DE BÚSQUEDA
-    if (linkedInSearchUrl) {
-      // BÚSQUEDA CON URL DIRECTA
-      searchType = "direct_url";
-
-      // Validar que sea una URL de LinkedIn (Regular o Sales Navigator)
-      if (!linkedInSearchUrl.includes("linkedin.com")) {
-        return res.status(400).json({
-          success: false,
-          message: "URL debe ser de LinkedIn",
-          error: "INVALID_LINKEDIN_URL",
-          providedUrl: linkedInSearchUrl,
-        });
-      }
-
-      const searchId = `search_${Date.now()}_${Math.random()
-        .toString(36)
-        .substr(2, 9)}`;
-
-      // Crear búsqueda inicial para URL directa
-      searchData = {
-        searchId,
-        containerId: null,
-        status: "launching",
-        progress: 0,
-        createdAt: new Date().toISOString(),
-        completedAt: null,
-        linkedInSearchUrl,
-        configuracionAutomatica: null,
-        results: [],
-      };
-
-      // Guardar en base de datos
-      await dbService.saveSearch(searchData);
-
-      // Lanzar agente con URL directa y configuración automática
-      const startTime = Date.now();
-      launchResult = await phantombusterService.launchSearchAgentWithUrl(
-        linkedInSearchUrl,
-        numberOfResults,
-        urlsWithPriorities.numberOfPage,
-        urlsWithPriorities.startPage
-      );
-      const duration = Date.now() - startTime;
-
-      // Actualizar búsqueda
-      searchData.containerId = launchResult.containerId;
-      searchData.status = "running";
-      await dbService.updateSearchStatus(searchId, "running", 0, null, null);
-
-      // Obtener session_cookie_hash
-      const cookieHash = await cookieManager.getSessionCookieHash();
-
-      metricsCollector.recordPhantombusterSearch(true, duration);
-
-      res.json({
-        success: true,
-        searchId,
-        containerId: launchResult.containerId,
-        status: "running",
-        session_cookie_hash: cookieHash.session_cookie_hash,
-        message: "Búsqueda iniciada correctamente con configuración automática",
-        data: {
-          searchParams: {
-            linkedInSearchUrl,
-            numberOfResultsPerLaunch: parseInt(numberOfResults),
-            numberOfResultsPerSearch: parseInt(numberOfResults),
-            // Configuración automática aplicada
-            configuracionAutomatica: {
-              numberOfPage: urlsWithPriorities.numberOfPage,
-              userAgent: configuracionAutomatica.userAgent,
-              csvName: configuracionAutomatica.csvName,
-            },
-          },
-          mappedParams: {
-            linkedInSearchUrl,
-            numberOfResultsPerLaunch: parseInt(numberOfResultsPerLaunch),
-            numberOfResultsPerSearch: parseInt(numberOfResultsPerSearch),
-            connection_degree:
-              configuracionAutomatica.connectionDegreesToScrape,
-            results_per_launch: parseInt(numberOfResultsPerLaunch),
-            total_results: parseInt(numberOfResultsPerSearch),
-          },
-          searchUrls: [linkedInSearchUrl],
-          estimatedDuration: "5-10 minutos",
-          estimatedDurationMinutes: 7,
-        },
-      });
-    } else {
-      // BÚSQUEDA CON PARÁMETROS SIMPLES (LÓGICA EXISTENTE)
-      searchType = "simple_params";
-
-      // Validar parámetros requeridos
-      const {
-        sectors,
-        roles,
-        countries,
-        companySizes,
-        options = {},
-      } = req.body;
-
-      if (!sectors || !roles || !countries) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Para búsqueda simple: sectors, roles y countries son requeridos",
-          error: "MISSING_PARAMETERS",
-        });
-      }
-
-      // CONFIGURACIÓN HARCODEADA AUTOMÁTICA
-      const configuracionAutomatica = {
-        // Configuración de círculos
-        circles: {
-          first: true,
-          second: true,
-          third: true,
-        },
-
-        // Configuración de categoría
-        category: "People",
-
-        // Configuración de páginas
-        numberOfPage: 5,
-        numberOfLinesPerLaunch: 100,
-
-        // Configuración de resultados
-        onlyGetFirstResult: false,
-        connectionDegreesToScrape: ["1", "2", "3+"],
-
-        // Configuración de optimización
-        enrichLeadsWithAdditionalInformation: true,
-        removeDuplicateProfiles: true,
-
-        // Configuración de sesión (obtenida desde variable de entorno)
-        sessionCookie:
-          process.env.LINKEDIN_SESSION_COOKIE ||
-          (await cookieManager.getSessionCookie()),
-        userAgent:
-          process.env.LINKEDIN_USER_AGENT ||
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-
-        // Configuración de archivo
-        csvName: `europbots_search_${Date.now()}`,
-
-        // PARÁMETROS ESPECÍFICOS PARA PHANTOMBUSTER
-        numberOfResultsPerLaunch: parseInt(numberOfResultsPerLaunch) || 125, // VALOR POR DEFECTO: 125
-        numberOfResultsPerSearch: parseInt(numberOfResultsPerSearch) || 2000, // VALOR POR DEFECTO: 2000
-        numberOfLinesPerLaunch: parseInt(numberOfLinesPerLaunch) || 100, // VALOR POR DEFECTO: 100
-      };
-
-      const searchParams = {
-        sectors,
-        roles,
-        countries,
-        companySizes,
-        removeDuplicateProfiles:
-          configuracionAutomatica.removeDuplicateProfiles,
-        enrichLeadsWithAdditionalInformation:
-          configuracionAutomatica.enrichLeadsWithAdditionalInformation,
-      };
-      const mappedParams = mapSimpleParams(searchParams);
-      const searchUrls =
-        phantombusterService.processSearchParameters(searchParams);
-
-      const searchId = `search_${Date.now()}_${Math.random()
-        .toString(36)
-        .substr(2, 9)}`;
-
-      // Crear búsqueda inicial para parámetros simples
-      searchData = {
-        searchId,
-        containerId: null,
-        status: "launching",
-        progress: 0,
-        createdAt: new Date().toISOString(),
-        completedAt: null,
-        searchParams,
-        mappedParams,
-        searchUrls,
-        configuracionAutomatica,
-        results: [],
-      };
-
-      // Guardar en base de datos
-      await dbService.saveSearch(searchData);
-
-      // Lanzar agente con parámetros simples y configuración automática
-      const startTime = Date.now();
-      launchResult = await phantombusterService.launchSearchAgent(searchUrls, {
-        ...configuracionAutomatica,
-        ...options,
-      });
-      const duration = Date.now() - startTime;
-
-      // Actualizar búsqueda
-      searchData.containerId = launchResult.containerId;
-      searchData.status = "running";
-      await dbService.updateSearchStatus(searchId, "running", 0, null, null);
-
-      // Obtener session_cookie_hash
-      const cookieHash = await cookieManager.getSessionCookieHash();
-
-      metricsCollector.recordPhantombusterSearch(true, duration);
-
-      res.json({
-        success: true,
-        searchId,
-        containerId: launchResult.containerId,
-        status: "running",
-        session_cookie_hash: cookieHash.session_cookie_hash,
-        message: "Búsqueda iniciada correctamente con configuración automática",
-        data: {
-          searchParams,
-          mappedParams,
-          searchUrls,
-          configuracionAutomatica: {
-            circles: configuracionAutomatica.circles,
-            category: configuracionAutomatica.category,
-            numberOfPage: configuracionAutomatica.numberOfPage,
-            onlyGetFirstResult: configuracionAutomatica.onlyGetFirstResult,
-            connectionDegreesToScrape:
-              configuracionAutomatica.connectionDegreesToScrape,
-            enrichLeadsWithAdditionalInformation:
-              configuracionAutomatica.enrichLeadsWithAdditionalInformation,
-            removeDuplicateProfiles:
-              configuracionAutomatica.removeDuplicateProfiles,
-            userAgent: configuracionAutomatica.userAgent,
-            csvName: configuracionAutomatica.csvName,
-          },
-          estimatedDuration: "5-10 minutos",
-          estimatedDurationMinutes: 7,
-        },
+    // BÚSQUEDA CON URL DIRECTA (ÚNICA OPCIÓN DISPONIBLE)
+    if (!linkedInSearchUrl) {
+      return res.status(400).json({
+        success: false,
+        message: "linkedInSearchUrl es requerido para búsquedas",
+        error: "MISSING_LINKEDIN_URL",
       });
     }
+
+    // Validar que sea una URL de LinkedIn (Regular o Sales Navigator)
+    if (!linkedInSearchUrl.includes("linkedin.com")) {
+      return res.status(400).json({
+        success: false,
+        message: "URL debe ser de LinkedIn",
+        error: "INVALID_LINKEDIN_URL",
+        providedUrl: linkedInSearchUrl,
+      });
+    }
+
+    // Extraer numberOfPage y startPage de urlsWithPriorities
+    let numberOfPage = 5; // valor por defecto
+    let startPage = 1;    // valor por defecto
+
+    if (urlsWithPriorities && urlsWithPriorities.length > 0) {
+      // Buscar la URL que coincida con linkedInSearchUrl
+      const matchingUrl = urlsWithPriorities.find(url =>
+        url.url === linkedInSearchUrl || url.url_template === linkedInSearchUrl
+      );
+
+      if (matchingUrl) {
+        let rawNumberOfPage = parseInt(matchingUrl.numberOfPage) || 5;
+        let rawStartPage = parseInt(matchingUrl.startPage) || 1;
+
+        // VALIDACIÓN Y CORRECCIÓN DE PARÁMETROS
+        console.log(`🔍 Parámetros originales: numberOfPage=${rawNumberOfPage}, startPage=${rawStartPage}`);
+
+        // USAR LOS PARÁMETROS EXACTOS DE N8N SIN CORRECCIÓN
+        startPage = rawStartPage;
+        numberOfPage = rawNumberOfPage;
+
+        console.log(`✅ Usando parámetros exactos de n8n: numberOfPage=${numberOfPage}, startPage=${startPage}`);
+
+        // Solo validar valores mínimos, no corregir lógica de negocio
+        if (numberOfPage < 1) {
+          console.log(`⚠️ numberOfPage (${numberOfPage}) es muy bajo, pero manteniendo valor original`);
+        }
+
+        if (startPage < 1) {
+          console.log(`⚠️ startPage (${startPage}) es muy bajo, pero manteniendo valor original`);
+        }
+
+        console.log(`✅ Parámetros corregidos: numberOfPage=${numberOfPage}, startPage=${startPage}`);
+      } else {
+        console.log(`⚠️ No se encontró URL coincidente en urlsWithPriorities, usando valores por defecto`);
+        console.log(`🔍 URL buscada: ${linkedInSearchUrl}`);
+      }
+    } else {
+      console.log(`⚠️ No se envió urlsWithPriorities, usando valores por defecto`);
+    }
+
+    console.log(`📋 Parámetros finales: numberOfPage=${numberOfPage}, startPage=${startPage}`);
+    console.log(`🔍 URLs disponibles en urlsWithPriorities:`, urlsWithPriorities ? urlsWithPriorities.map(u => ({ url: u.url, numberOfPage: u.numberOfPage, startPage: u.startPage })) : 'No hay URLs');
+
+    const searchId = `search_${Date.now()}_${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
+
+    // Crear búsqueda inicial para URL directa
+    searchData = {
+      searchId,
+      containerId: null,
+      status: "launching",
+      progress: 0,
+      createdAt: new Date().toISOString(),
+      completedAt: null,
+      linkedInSearchUrl,
+      results: [],
+    };
+
+    // Guardar en base de datos
+    await dbService.saveSearch(searchData);
+
+    // Lanzar agente con URL directa
+    console.log(`🚀 Lanzando agente con parámetros:`, {
+      linkedInSearchUrl,
+      numberOfResults,
+      numberOfPage,
+      startPage
+    });
+
+    const startTime = Date.now();
+    launchResult = await phantombusterService.launchSearchAgentWithUrl(
+      linkedInSearchUrl,
+      numberOfResults,
+      parseInt(numberOfPage),
+      parseInt(startPage)
+    );
+    const duration = Date.now() - startTime;
+
+    // Actualizar búsqueda
+    searchData.containerId = launchResult.containerId;
+    searchData.status = "running";
+    await dbService.updateSearchStatus(searchId, "running", 0, null, null);
+
+    // Obtener session_cookie_hash
+    const cookieHash = await cookieManager.getSessionCookieHash();
+
+    metricsCollector.recordPhantombusterSearch(true, duration);
+
+    res.json({
+      success: true,
+      searchId,
+      containerId: launchResult.containerId,
+      status: "running",
+      session_cookie_hash: cookieHash.session_cookie_hash,
+      message: "Búsqueda iniciada correctamente",
+      data: {
+        searchParams: {
+          linkedInSearchUrl,
+          numberOfResults: parseInt(numberOfResults),
+          numberOfPage: numberOfPage,
+          startPage: startPage,
+        },
+        estimatedDuration: "5-10 minutos",
+        estimatedDurationMinutes: 7,
+      },
+    });
   } catch (error) {
     console.error("❌ Error en búsqueda:", error);
     metricsCollector.recordError("SEARCH_ERROR", "/api/search", error.message);
@@ -654,24 +822,16 @@ app.post("/api/search", authenticateApiKey, async (req, res) => {
 });
 
 // Endpoint mejorado para verificar estado de agentes
-app.get(
-  "/api/search/status/:containerId",
+app.get("/api/search/status/:containerId",
   authenticateApiKey,
   async (req, res) => {
     try {
       const { containerId } = req.params;
 
-      // Verificación de estado del contenedor
-
-      // Verificar si el containerId es válido
-      if (!containerId || containerId.length < 10) {
-        return res.status(400).json({
-          success: false,
-          message: "Container ID inválido",
-          error: "INVALID_CONTAINER_ID",
-          containerId,
-          timestamp: new Date().toISOString(),
-        });
+      // Validación optimizada usando utilidad
+      const validation = validateContainerId(containerId);
+      if (!validation.isValid) {
+        return res.status(400).json(validation.error);
       }
 
       try {
@@ -789,25 +949,10 @@ app.get(
         }
       }
     } catch (error) {
-      console.error("❌ Error obteniendo estado de búsqueda:", error);
+      logError("Error obteniendo estado de búsqueda", error);
 
-      // Manejar errores específicos de Phantombuster
-      let statusCode = 500;
-      let errorMessage = "Error obteniendo estado de búsqueda";
-
-      if (error.message && error.message.includes("Agent not found")) {
-        statusCode = 404;
-        errorMessage = "Agente no encontrado o expirado";
-      } else if (error.message && error.message.includes("400")) {
-        statusCode = 400;
-        errorMessage = "Solicitud inválida al agente";
-      } else if (error.message && error.message.includes("401")) {
-        statusCode = 401;
-        errorMessage = "No autorizado para acceder al agente";
-      } else if (error.message && error.message.includes("403")) {
-        statusCode = 403;
-        errorMessage = "Acceso prohibido al agente";
-      }
+      // Usar utilidad para mapear errores de Phantombuster
+      const errorMapping = mapPhantombusterError(error);
 
       metricsCollector.recordError(
         "STATUS_ERROR",
@@ -815,104 +960,19 @@ app.get(
         error.message
       );
 
-      res.status(statusCode).json({
-        success: false,
-        message: errorMessage,
-        error: error.message,
-        containerId: req.params.containerId,
-        timestamp: new Date().toISOString(),
-      });
+      res.status(errorMapping.status).json(
+        createErrorResponse(
+          errorMapping.message,
+          error,
+          errorMapping.status,
+          { containerId: req.params.containerId }
+        )
+      );
     }
   }
 );
 
-app.get(
-  "/api/search/simple-direct/status/:containerId",
-  authenticateApiKey,
-  async (req, res) => {
-    try {
-      const { containerId } = req.params;
 
-      // Verificación de estado del contenedor
-
-      const statusResult = await phantombusterService.getAgentStatus(
-        containerId,
-        "search"
-      );
-
-      if (statusResult.data.status === "finished") {
-        const resultsResult = await phantombusterService.getAgentResults(
-          containerId
-        );
-
-        if (resultsResult.success) {
-          const processedResults =
-            phantombusterService.processPhantombusterResults(
-              resultsResult.results,
-              { containerId }
-            );
-
-          res.json({
-            success: true,
-            status: "completed",
-            progress: 100,
-            totalResults: processedResults.length,
-            results: processedResults,
-            message: "Búsqueda completada",
-          });
-        } else {
-          res.json({
-            success: true,
-            status: "processing",
-            progress: 50,
-            message: "Procesando resultados...",
-          });
-        }
-      } else {
-        res.json({
-          success: true,
-          status: statusResult.data.status,
-          progress: statusResult.data.progress || 0,
-          message: statusResult.data.message || "Búsqueda en progreso",
-        });
-      }
-    } catch (error) {
-      console.error("❌ Error obteniendo estado de búsqueda:", error);
-
-      // Manejar errores específicos de Phantombuster
-      let statusCode = 500;
-      let errorMessage = "Error obteniendo estado de búsqueda";
-
-      if (error.message && error.message.includes("Agent not found")) {
-        statusCode = 404;
-        errorMessage = "Agente no encontrado o expirado";
-      } else if (error.message && error.message.includes("400")) {
-        statusCode = 400;
-        errorMessage = "Solicitud inválida al agente";
-      } else if (error.message && error.message.includes("401")) {
-        statusCode = 401;
-        errorMessage = "No autorizado para acceder al agente";
-      } else if (error.message && error.message.includes("403")) {
-        statusCode = 403;
-        errorMessage = "Acceso prohibido al agente";
-      }
-
-      metricsCollector.recordError(
-        "STATUS_ERROR",
-        "/api/search/simple-direct/status",
-        error.message
-      );
-
-      res.status(statusCode).json({
-        success: false,
-        message: errorMessage,
-        error: error.message,
-        containerId: req.params.containerId,
-        timestamp: new Date().toISOString(),
-      });
-    }
-  }
-);
 
 // Endpoint para recuperar resultados de agentes expirados
 app.get(
@@ -925,15 +985,10 @@ app.get(
 
           // Intentando recuperar resultados del agente expirado
 
-      // Verificar si el containerId es válido
-      if (!containerId || containerId.length < 10) {
-        return res.status(400).json({
-          success: false,
-          message: "Container ID inválido",
-          error: "INVALID_CONTAINER_ID",
-          containerId,
-          timestamp: new Date().toISOString(),
-        });
+      // Validación optimizada usando utilidad
+      const validation = validateContainerId(containerId);
+      if (!validation.isValid) {
+        return res.status(400).json(validation.error);
       }
 
       // SI ES PARTE DE UNA SECUENCIA
@@ -953,11 +1008,11 @@ app.get(
 
           return res.json({
             success: true,
-            status: "recovered_with_sequential_range",
+            status: "recovered_with_fetch_result_object",
             progress: 100,
             totalResults: results.results.length,
             results: results.results,
-            message: "Resultados de secuencia recuperados exitosamente",
+            message: "Resultados recuperados exitosamente",
             containerId,
             sessionId,
             urlId,
@@ -965,17 +1020,256 @@ app.get(
             timestamp: new Date().toISOString(),
             source: "sequential_distribution",
             method: "range_specific_download",
-            note: "Recuperación exitosa con rango específico de secuencia",
+            note: "Recuperación exitosa con distribución secuencial",
           });
         } catch (sequenceError) {
           console.error(
             "❌ Error recuperando resultados de secuencia:",
             sequenceError
           );
+
+          // Verificar si es un error de configuración (sessionId/urlId no encontrados)
+          if (sequenceError.message && sequenceError.message.includes("Estado de URL no encontrado")) {
+            console.log(`⚠️ Configuración de secuencia no encontrada: ${sessionId} - ${urlId}`);
+            return res.status(404).json({
+              success: false,
+              status: "sequential_config_not_found",
+              message: "Sequential distribution configuration not found",
+              error: "SEQUENTIAL_CONFIG_NOT_FOUND",
+              containerId,
+              sessionId,
+              urlId,
+              timestamp: new Date().toISOString(),
+              note: "Los parámetros sessionId y urlId no corresponden a una configuración válida en la base de datos",
+              details: {
+                sessionId,
+                urlId,
+                error: sequenceError.message
+              }
+            });
+          }
+
+
+          // INTENTAR DETECTAR ERRORES CONOCIDOS ANTES DE DEVOLVER ERROR 500
+          try {
+            console.log(`🔍 Verificando errores conocidos para container de secuencia: ${containerId}`);
+
+            // Obtener el estado del agente para ver si hay algún mensaje específico
+            const agentStatus = await phantombusterService.getAgentStatus(containerId);
+
+            if (agentStatus && (agentStatus.data || agentStatus.containerOutput)) {
+              const containerData = agentStatus.data;
+              const outputText = JSON.stringify(agentStatus.containerOutput || {}).toLowerCase();
+
+              // Detectar error específico de argumentos inválidos
+              if (outputText.includes("phantom argument is invalid") ||
+                  outputText.includes("search => must be string")) {
+
+                console.log(`⚠️ Container de secuencia ${containerId} tuvo error de argumentos inválidos`);
+
+                // Guardar el error en la base de datos
+                try {
+                  await knownErrorsService.saveKnownError({
+                    containerId,
+                    errorType: "argument_validation_error",
+                    errorMessage: "the Phantom argument is invalid: - search => must be string",
+                    errorDetails: {
+                      expected: "search parameter should be a string URL",
+                      received: "search parameter was an object with linkedInSearchUrl property",
+                      solution: "pass linkedInSearchUrl directly as search parameter",
+                      outputText: outputText.substring(0, 500),
+                      context: "sequential_distribution",
+                      sessionId,
+                      urlId
+                    },
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    durationMs: containerData.endedAt - containerData.launchedAt
+                  });
+                } catch (dbError) {
+                  console.error(`❌ Error guardando error conocido en BD: ${dbError.message}`);
+                }
+
+                return res.status(404).json({
+                  success: false,
+                  status: "invalid_arguments",
+                  message: "Container failed due to invalid arguments",
+                  error: "INVALID_ARGUMENTS",
+                  containerId,
+                  sessionId,
+                  urlId,
+                  timestamp: new Date().toISOString(),
+                  note: "El container de secuencia falló debido a argumentos inválidos",
+                  containerInfo: {
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    status: containerData.status,
+                    duration: containerData.endedAt - containerData.launchedAt,
+                    errorType: "argument_validation_error"
+                  },
+                  context: "sequential_distribution"
+                });
+              }
+
+              // Detectar error de "No results found" con exit code 1
+              if (outputText.includes("no results found") && containerData.exitCode === 1) {
+
+                console.log(`⚠️ Container de secuencia ${containerId} no encontró resultados (exit code 1)`);
+
+                // Guardar el error en la base de datos
+                try {
+                  await knownErrorsService.saveKnownError({
+                    containerId,
+                    errorType: "no_results_found",
+                    errorMessage: "No results found - Process finished with error (exit code: 1)",
+                    errorDetails: {
+                      exitCode: containerData.exitCode,
+                      endType: containerData.endType,
+                      status: containerData.status,
+                      reason: "Phantombuster no encontró resultados para la búsqueda",
+                      outputText: outputText.substring(0, 500),
+                      context: "sequential_distribution",
+                      sessionId,
+                      urlId
+                    },
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    durationMs: containerData.endedAt - containerData.launchedAt
+                  });
+                } catch (dbError) {
+                  console.error(`❌ Error guardando error conocido en BD: ${dbError.message}`);
+                }
+
+                // ACTUALIZAR ESTADO EN LA BASE DE DATOS A 'completed'
+                try {
+                  await dbService.updateSequentialUrlStateStatus(sessionId, urlId, 'completed');
+                  console.log(`✅ Estado actualizado a 'completed' para sessionId: ${sessionId}, urlId: ${urlId} (no_results_found)`);
+                } catch (dbUpdateError) {
+                  console.error(`❌ Error actualizando estado a 'completed': ${dbUpdateError.message}`);
+                }
+
+                return res.status(404).json({
+                  success: false,
+                  status: "no_results_found",
+                  message: "No results found for this search",
+                  error: "NO_RESULTS_FOUND",
+                  containerId,
+                  sessionId,
+                  urlId,
+                  timestamp: new Date().toISOString(),
+                  note: "Phantombuster no encontró resultados para la búsqueda especificada",
+                  containerInfo: {
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    status: containerData.status,
+                    duration: containerData.endedAt - containerData.launchedAt,
+                    errorType: "no_results_found"
+                  },
+                  context: "sequential_distribution",
+                  databaseUpdate: "status_updated_to_completed"
+                });
+              }
+
+              // Detectar containers detenidos manualmente
+              if (containerData.exitCode === 137 ||
+                  containerData.endType === "killed" ||
+                  (containerData.status === "finished" && containerData.exitCode !== 0)) {
+
+                console.log(`⚠️ Container de secuencia ${containerId} fue detenido manualmente o terminó con error`);
+
+                // Guardar el error en la base de datos
+                try {
+                  await knownErrorsService.saveKnownError({
+                    containerId,
+                    errorType: "manually_stopped",
+                    errorMessage: `Container stopped with exit code ${containerData.exitCode}`,
+                    errorDetails: {
+                      exitCode: containerData.exitCode,
+                      endType: containerData.endType,
+                      status: containerData.status,
+                      reason: containerData.exitCode === 137 ? "Process killed (SIGKILL)" : "Process terminated with error",
+                      outputText: outputText.substring(0, 500),
+                      context: "sequential_distribution",
+                      sessionId,
+                      urlId
+                    },
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    durationMs: containerData.endedAt - containerData.launchedAt
+                  });
+                } catch (dbError) {
+                  console.error(`❌ Error guardando error conocido en BD: ${dbError.message}`);
+                }
+
+                return res.status(404).json({
+                  success: false,
+                  status: "manually_stopped",
+                  message: "Container was manually stopped before completion",
+                  error: "MANUALLY_STOPPED",
+                  containerId,
+                  sessionId,
+                  urlId,
+                  timestamp: new Date().toISOString(),
+                  note: "El container de secuencia fue detenido manualmente",
+                  containerInfo: {
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    status: containerData.status,
+                    duration: containerData.endedAt - containerData.launchedAt
+                  },
+                  context: "sequential_distribution"
+                });
+              }
+
+                            // Detectar resultados ya recuperados
+              const searchText = JSON.stringify(agentStatus.data || {}).toLowerCase() + " " + outputText;
+              if (searchText.includes("all search results have been retrieved") ||
+                  searchText.includes("we've already retrieved all results from that search") ||
+                  searchText.includes("already retrieved all results") ||
+                  searchText.includes("search successfully finished")) {
+
+                console.log(`✅ Container de secuencia ${containerId} ya tiene todos los resultados recuperados`);
+
+                // ACTUALIZAR ESTADO EN LA BASE DE DATOS A 'completed'
+                try {
+                  await dbService.updateSequentialUrlStateStatus(sessionId, urlId, 'completed');
+                  console.log(`✅ Estado actualizado a 'completed' para sessionId: ${sessionId}, urlId: ${urlId}`);
+                } catch (dbUpdateError) {
+                  console.error(`❌ Error actualizando estado a 'completed': ${dbUpdateError.message}`);
+                }
+
+                return res.json({
+                  success: true,
+                  status: "results_already_retrieved",
+                  progress: 100,
+                  totalResults: 0,
+                  results: [],
+                  message: "All search results have been retrieved",
+                  containerId,
+                  sessionId,
+                  urlId,
+                  timestamp: new Date().toISOString(),
+                  source: "phantombuster_output",
+                  method: "output_analysis",
+                  note: "Phantombuster indica que ya se recuperaron todos los resultados",
+                  context: "sequential_distribution",
+                  databaseUpdate: "status_updated_to_completed"
+                });
+              }
+            }
+          } catch (errorAnalysisError) {
+            console.error(`❌ Error analizando errores conocidos: ${errorAnalysisError.message}`);
+          }
+
+          // Si no se detectó ningún error conocido, devolver el error original
           return res.status(500).json({
             success: false,
             message: "Error recuperando resultados de secuencia",
             error: sequenceError.message,
+            containerId,
+            sessionId,
+            urlId,
+            context: "sequential_distribution"
           });
         }
       }
@@ -997,6 +1291,132 @@ app.get(
               fetchResultObjectResult.results,
               { containerId }
             );
+
+                    // Verificar si los resultados están malformados
+          const hasMalformedData = processedResults.some(result =>
+            result.fullName === "undefined undefined" ||
+            result.fullName === "null null" ||
+            (result.firstName === "" && result.lastName === "" && result.fullName === "") ||
+            result.isComplete === false
+          );
+
+          if (hasMalformedData && processedResults.length > 0) {
+            console.log(`⚠️ Container ${containerId} tiene datos malformados: ${processedResults.length} resultados con datos incompletos`);
+
+            // Verificar si el container originalmente reportó "No results found"
+            try {
+              const agentStatus = await phantombusterService.getAgentStatus(containerId);
+              const outputText = JSON.stringify(agentStatus.containerOutput || {}).toLowerCase();
+
+              if (outputText.includes("no results found") && agentStatus.data && agentStatus.data.exitCode === 1) {
+                console.log(`⚠️ Container ${containerId} reportó "No results found" con exit code 1`);
+
+                // Guardar como error de "no results found"
+                try {
+                  await knownErrorsService.saveKnownError({
+                    containerId,
+                    errorType: "no_results_found",
+                    errorMessage: "No results found - Process finished with error (exit code: 1)",
+                    errorDetails: {
+                      exitCode: agentStatus.data.exitCode,
+                      endType: agentStatus.data.endType,
+                      status: agentStatus.data.status,
+                      reason: "Phantombuster no encontró resultados para la búsqueda",
+                      outputText: outputText.substring(0, 500),
+                      context: "fetch_result_object_with_malformed_data",
+                      malformedDataDetected: true,
+                      totalResults: processedResults.length
+                    },
+                    exitCode: agentStatus.data.exitCode,
+                    endType: agentStatus.data.endType,
+                    durationMs: agentStatus.data.endedAt - agentStatus.data.launchedAt
+                  });
+                } catch (dbError) {
+                  console.error(`❌ Error guardando error de no results found: ${dbError.message}`);
+                }
+
+                                // ACTUALIZAR ESTADO EN LA BASE DE DATOS A 'completed' si hay sessionId y urlId
+                if (sessionId && urlId) {
+                  try {
+                    await dbService.updateSequentialUrlStateStatus(sessionId, urlId, 'completed');
+                    console.log(`✅ Estado actualizado a 'completed' para sessionId: ${sessionId}, urlId: ${urlId} (no_results_found)`);
+                  } catch (dbUpdateError) {
+                    console.error(`❌ Error actualizando estado a 'completed': ${dbUpdateError.message}`);
+                  }
+                }
+
+                return res.json({
+                  success: false,
+                  status: "no_results_found",
+                  message: "No results found for this search",
+                  error: "NO_RESULTS_FOUND",
+                  containerId,
+                  sessionId,
+                  urlId,
+                  timestamp: new Date().toISOString(),
+                  note: "Phantombuster no encontró resultados para la búsqueda especificada",
+                  containerInfo: {
+                    exitCode: agentStatus.data.exitCode,
+                    endType: agentStatus.data.endType,
+                    status: agentStatus.data.status,
+                    duration: agentStatus.data.endedAt - agentStatus.data.launchedAt,
+                    errorType: "no_results_found"
+                  },
+                  methodsAttempted: [
+                    "fetch-result-object",
+                    "direct_fetch",
+                    "s3_fallback",
+                    "output_analysis"
+                  ],
+                  databaseUpdate: sessionId && urlId ? "status_updated_to_completed" : "no_sequential_context"
+                });
+              }
+            } catch (statusError) {
+              console.error(`❌ Error verificando status del container: ${statusError.message}`);
+            }
+
+            // Si no se detectó "no results found", guardar como datos malformados
+            try {
+              await knownErrorsService.saveKnownError({
+                containerId,
+                errorType: "malformed_data_error",
+                errorMessage: "Container returned malformed/incomplete data",
+                errorDetails: {
+                  totalResults: processedResults.length,
+                  malformedResults: processedResults.filter(r =>
+                    r.fullName === "undefined undefined" ||
+                    r.fullName === "null null" ||
+                    (r.firstName === "" && r.lastName === "" && r.fullName === "") ||
+                    r.isComplete === false
+                  ).length,
+                  sampleData: processedResults[0],
+                  reason: "Phantombuster returned data but with incomplete/malformed profile information",
+                  context: "fetch_result_object_success"
+                },
+                exitCode: null,
+                endType: null,
+                durationMs: null
+              });
+            } catch (dbError) {
+              console.error(`❌ Error guardando error de datos malformados: ${dbError.message}`);
+            }
+
+            return res.json({
+              success: true,
+              status: "recovered_with_fetch_result_object",
+              progress: 100,
+              totalResults: processedResults.length,
+              results: processedResults,
+              message: "Resultados recuperados exitosamente",
+              containerId,
+              timestamp: new Date().toISOString(),
+              source: fetchResultObjectResult.source,
+              method: "fetch-result-object",
+              note: "Recuperación exitosa usando el endpoint oficial de Phantombuster",
+              warning: "Los datos recuperados están incompletos o malformados",
+              errorType: "malformed_data_error"
+            });
+          }
 
           return res.json({
             success: true,
@@ -1038,12 +1458,11 @@ app.get(
 
           return res.json({
             success: true,
-            status: "recovered_with_direct_method",
+            status: "recovered_with_fetch_result_object",
             progress: 100,
             totalResults: processedResults.length,
             results: processedResults,
-            message:
-              "Resultados recuperados exitosamente usando método directo",
+            message: "Resultados recuperados exitosamente",
             containerId,
             timestamp: new Date().toISOString(),
             source: directResults.source,
@@ -1075,11 +1494,11 @@ app.get(
 
           return res.json({
             success: true,
-            status: "recovered_from_s3",
+            status: "recovered_with_fetch_result_object",
             progress: 100,
             totalResults: processedResults.length,
             results: processedResults,
-            message: "Resultados recuperados exitosamente desde S3",
+            message: "Resultados recuperados exitosamente",
             containerId,
             timestamp: new Date().toISOString(),
             source: s3Results.source,
@@ -1091,20 +1510,258 @@ app.get(
         // S3 falló
       }
 
-      // Si todos los métodos fallan
-      return res.status(404).json({
-        success: false,
-        message: "No se pudieron recuperar resultados del agente expirado",
-        error: "ALL_METHODS_FAILED",
-        containerId,
-        timestamp: new Date().toISOString(),
-        note: "Se intentaron todos los métodos de recuperación disponibles",
-        methodsAttempted: [
-          "fetch-result-object",
-          "direct_fetch",
-          "s3_fallback",
-        ],
-      });
+      // CUARTO: Si todos los métodos fallan, verificar si es porque ya se recuperaron todos los resultados
+      try {
+        console.log(`🔍 Verificando si ya se recuperaron todos los resultados para: ${containerId}`);
+
+        // Obtener el estado del agente para ver si hay algún mensaje específico
+        const agentStatus = await phantombusterService.getAgentStatus(containerId);
+
+                                if (agentStatus && (agentStatus.data || agentStatus.containerOutput)) {
+          // Buscar el mensaje específico en la respuesta completa de Phantombuster
+          const responseText = JSON.stringify(agentStatus.data || {}).toLowerCase();
+          const outputText = JSON.stringify(agentStatus.containerOutput || {}).toLowerCase();
+
+          console.log(`🔍 Respuesta completa del agente ${containerId}:`, JSON.stringify(agentStatus.data, null, 2));
+          console.log(`🔍 Output del container ${containerId}:`, JSON.stringify(agentStatus.containerOutput, null, 2));
+          console.log(`🔍 Texto de búsqueda (data):`, responseText);
+          console.log(`🔍 Texto de búsqueda (output):`, outputText);
+
+          // Buscar diferentes variantes del mensaje en ambos campos
+          const searchText = responseText + " " + outputText;
+          if (searchText.includes("all search results have been retrieved") ||
+              searchText.includes("we've already retrieved all results from that search") ||
+              searchText.includes("already retrieved all results") ||
+              searchText.includes("search successfully finished")) {
+
+                        console.log(`✅ Encontrado mensaje de resultados ya recuperados para: ${containerId}`);
+
+            // Si hay sessionId y urlId, actualizar estado en la base de datos
+            if (req.query.sessionId && req.query.urlId) {
+              try {
+                await dbService.updateSequentialUrlStateStatus(req.query.sessionId, req.query.urlId, 'completed');
+                console.log(`✅ Estado actualizado a 'completed' para sessionId: ${req.query.sessionId}, urlId: ${req.query.urlId}`);
+              } catch (dbUpdateError) {
+                console.error(`❌ Error actualizando estado a 'completed': ${dbUpdateError.message}`);
+              }
+            }
+
+            return res.json({
+              success: true,
+              status: "results_already_retrieved",
+              progress: 100,
+              totalResults: 0,
+              results: [],
+              message: "All search results have been retrieved",
+              containerId,
+              sessionId: req.query.sessionId,
+              urlId: req.query.urlId,
+              timestamp: new Date().toISOString(),
+              source: "phantombuster_output",
+              method: "output_analysis",
+              note: "Phantombuster indica que ya se recuperaron todos los resultados de esta búsqueda",
+              phantombusterMessage: "All search results have been retrieved",
+              agentStatus: agentStatus,
+              databaseUpdate: req.query.sessionId && req.query.urlId ? "status_updated_to_completed" : "no_sequential_context"
+            });
+          } else {
+            console.log(`❌ No se encontró el mensaje específico en la respuesta del agente ${containerId}`);
+          }
+        } else {
+          console.log(`❌ No se pudo obtener datos del agente ${containerId}:`, agentStatus);
+        }
+
+                                // Verificar si el container fue detenido manualmente o tuvo errores específicos
+            if (agentStatus && agentStatus.data) {
+              const containerData = agentStatus.data;
+              const outputText = JSON.stringify(agentStatus.containerOutput || {}).toLowerCase();
+
+                            // Detectar error específico de argumentos inválidos
+              if (outputText.includes("phantom argument is invalid") ||
+                  outputText.includes("search => must be string")) {
+
+                console.log(`⚠️ Container ${containerId} tuvo error de argumentos inválidos`);
+
+                // Guardar el error en la base de datos
+                try {
+                  await knownErrorsService.saveKnownError({
+                    containerId,
+                    errorType: "argument_validation_error",
+                    errorMessage: "the Phantom argument is invalid: - search => must be string",
+                    errorDetails: {
+                      expected: "search parameter should be a string URL",
+                      received: "search parameter was an object with linkedInSearchUrl property",
+                      solution: "pass linkedInSearchUrl directly as search parameter",
+                      outputText: outputText.substring(0, 500) // Primeros 500 caracteres del output
+                    },
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    durationMs: containerData.endedAt - containerData.launchedAt
+                  });
+                } catch (dbError) {
+                  console.error(`❌ Error guardando error conocido en BD: ${dbError.message}`);
+                }
+
+                return res.status(404).json({
+                  success: false,
+                  status: "invalid_arguments",
+                  message: "Container failed due to invalid arguments",
+                  error: "INVALID_ARGUMENTS",
+                  containerId,
+                  timestamp: new Date().toISOString(),
+                  note: "El container falló debido a argumentos inválidos (search debe ser string, no objeto)",
+                  containerInfo: {
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    status: containerData.status,
+                    duration: containerData.endedAt - containerData.launchedAt,
+                    errorType: "argument_validation_error"
+                  },
+                  methodsAttempted: [
+                    "fetch-result-object",
+                    "direct_fetch",
+                    "s3_fallback",
+                    "output_analysis"
+                  ],
+                });
+              }
+
+                            // Detectar error de "No results found" con exit code 1
+              if (outputText.includes("no results found") && containerData.exitCode === 1) {
+
+                console.log(`⚠️ Container ${containerId} no encontró resultados (exit code 1)`);
+
+                // Guardar el error en la base de datos
+                try {
+                  await knownErrorsService.saveKnownError({
+                    containerId,
+                    errorType: "no_results_found",
+                    errorMessage: "No results found - Process finished with error (exit code: 1)",
+                    errorDetails: {
+                      exitCode: containerData.exitCode,
+                      endType: containerData.endType,
+                      status: containerData.status,
+                      reason: "Phantombuster no encontró resultados para la búsqueda",
+                      outputText: outputText.substring(0, 500)
+                    },
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    durationMs: containerData.endedAt - containerData.launchedAt
+                  });
+                } catch (dbError) {
+                  console.error(`❌ Error guardando error conocido en BD: ${dbError.message}`);
+                }
+
+                return res.status(404).json({
+                  success: false,
+                  status: "no_results_found",
+                  message: "No results found for this search",
+                  error: "NO_RESULTS_FOUND",
+                  containerId,
+                  timestamp: new Date().toISOString(),
+                  note: "Phantombuster no encontró resultados para la búsqueda especificada",
+                  containerInfo: {
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    status: containerData.status,
+                    duration: containerData.endedAt - containerData.launchedAt,
+                    errorType: "no_results_found"
+                  },
+                  methodsAttempted: [
+                    "fetch-result-object",
+                    "direct_fetch",
+                    "s3_fallback",
+                    "output_analysis"
+                  ],
+                });
+              }
+
+              // Detectar containers detenidos manualmente
+              if (containerData.exitCode === 137 ||
+                  containerData.endType === "killed" ||
+                  (containerData.status === "finished" && containerData.exitCode !== 0)) {
+
+                console.log(`⚠️ Container ${containerId} fue detenido manualmente o terminó con error`);
+
+                // Guardar el error en la base de datos
+                try {
+                  await knownErrorsService.saveKnownError({
+                    containerId,
+                    errorType: "manually_stopped",
+                    errorMessage: `Container stopped with exit code ${containerData.exitCode}`,
+                    errorDetails: {
+                      exitCode: containerData.exitCode,
+                      endType: containerData.endType,
+                      status: containerData.status,
+                      reason: containerData.exitCode === 137 ? "Process killed (SIGKILL)" : "Process terminated with error",
+                      outputText: outputText.substring(0, 500) // Primeros 500 caracteres del output
+                    },
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    durationMs: containerData.endedAt - containerData.launchedAt
+                  });
+                } catch (dbError) {
+                  console.error(`❌ Error guardando error conocido en BD: ${dbError.message}`);
+                }
+
+                return res.status(404).json({
+                  success: false,
+                  status: "manually_stopped",
+                  message: "Container was manually stopped before completion",
+                  error: "MANUALLY_STOPPED",
+                  containerId,
+                  timestamp: new Date().toISOString(),
+                  note: "El container fue detenido manualmente y no completó la búsqueda",
+                  containerInfo: {
+                    exitCode: containerData.exitCode,
+                    endType: containerData.endType,
+                    status: containerData.status,
+                    duration: containerData.endedAt - containerData.launchedAt
+                  },
+                  methodsAttempted: [
+                    "fetch-result-object",
+                    "direct_fetch",
+                    "s3_fallback",
+                    "output_analysis"
+                  ],
+                });
+              }
+            }
+
+            // Si no se encuentra el mensaje específico y no fue detenido manualmente, devolver error 404 genérico
+            return res.status(404).json({
+              success: false,
+              message: "No se pudieron recuperar resultados del agente expirado",
+              error: "ALL_METHODS_FAILED",
+              containerId,
+              timestamp: new Date().toISOString(),
+              note: "Se intentaron todos los métodos de recuperación disponibles",
+              methodsAttempted: [
+                "fetch-result-object",
+                "direct_fetch",
+                "s3_fallback",
+                "output_analysis"
+              ],
+            });
+      } catch (statusError) {
+        console.log(`⚠️ Error verificando estado del agente: ${statusError.message}`);
+
+        // Si no se puede verificar el estado, devolver error 404
+        return res.status(404).json({
+          success: false,
+          message: "No se pudieron recuperar resultados del agente expirado",
+          error: "ALL_METHODS_FAILED",
+          containerId,
+          timestamp: new Date().toISOString(),
+          note: "Se intentaron todos los métodos de recuperación disponibles",
+          methodsAttempted: [
+            "fetch-result-object",
+            "direct_fetch",
+            "s3_fallback",
+            "output_analysis"
+          ],
+        });
+      }
     } catch (error) {
       console.error("❌ Error recuperando resultados:", error);
 
@@ -1129,15 +1786,10 @@ app.get(
 
       console.log(`🌐 Obteniendo resultados desde S3 para: ${containerId}`);
 
-      // Verificar si el containerId es válido
-      if (!containerId || containerId.length < 10) {
-        return res.status(400).json({
-          success: false,
-          message: "Container ID inválido",
-          error: "INVALID_CONTAINER_ID",
-          containerId,
-          timestamp: new Date().toISOString(),
-        });
+      // Validación optimizada usando utilidad
+      const validation = validateContainerId(containerId);
+      if (!validation.isValid) {
+        return res.status(400).json(validation.error);
       }
 
       // Intentar obtener resultados desde S3
@@ -1153,11 +1805,11 @@ app.get(
 
         return res.json({
           success: true,
-          status: "recovered_from_s3",
+          status: "recovered_with_fetch_result_object",
           progress: 100,
           totalResults: processedResults.length,
           results: processedResults,
-          message: "Resultados recuperados desde S3 exitosamente",
+          message: "Resultados recuperados exitosamente",
           containerId,
           timestamp: new Date().toISOString(),
           source: s3Results.source,
@@ -1231,11 +1883,11 @@ app.post(
 
           return res.json({
             success: true,
-            status: "recovered_from_specific_url",
+            status: "recovered_with_fetch_result_object",
             progress: 100,
             totalResults: processedResults.length,
             results: processedResults,
-            message: "Resultados recuperados desde URL específica exitosamente",
+            message: "Resultados recuperados exitosamente",
             containerId: containerId || "unknown",
             timestamp: new Date().toISOString(),
             source: "specific_s3_url",
@@ -1292,15 +1944,10 @@ app.get(
         `📥 Obteniendo resultados del agente terminado: ${containerId}`
       );
 
-      // Verificar si el containerId es válido
-      if (!containerId || containerId.length < 10) {
-        return res.status(400).json({
-          success: false,
-          message: "Container ID inválido",
-          error: "INVALID_CONTAINER_ID",
-          containerId,
-          timestamp: new Date().toISOString(),
-        });
+      // Validación optimizada usando utilidad
+      const validation = validateContainerId(containerId);
+      if (!validation.isValid) {
+        return res.status(400).json(validation.error);
       }
 
       // Intentar obtener resultados directamente
@@ -1375,7 +2022,7 @@ app.post(
   authenticateApiKey,
   async (req, res) => {
     try {
-      const { profileUrl, options = {} } = req.body;
+      const { profileUrl, connectionDegree = "3rd+" } = req.body;
 
       if (!profileUrl) {
         return res.status(400).json({
@@ -1385,25 +2032,162 @@ app.post(
         });
       }
 
+      // Validar connectionDegree
+      const validDegrees = ["1st", "2nd", "3rd+"];
+      if (!validDegrees.includes(connectionDegree)) {
+        return res.status(400).json({
+          success: false,
+          message: "connectionDegree debe ser: 1st, 2nd, o 3rd+",
+          error: "INVALID_CONNECTION_DEGREE",
+        });
+      }
+
+      console.log(`🔍 Iniciando Profile Visitor para: ${profileUrl}`);
+      console.log(`📊 Grado de conexión: ${connectionDegree}`);
+
       const startTime = Date.now();
-      const result = await profileVisitorService.visitSingleProfile(
-        profileUrl,
-        options
+
+      // ============================================================================
+      // VERIFICACIÓN DE LÍMITES DIARIOS
+      // ============================================================================
+      // Usar la instancia global del DatabaseService
+      const dbService = req.app.locals.dbService;
+      if (!dbService) {
+        throw new Error('DatabaseService no está disponible');
+      }
+
+      const userId = req.query.userId || 'default';
+      const date = new Date().toISOString().split('T')[0];
+      const limits = await dbService.getCompleteDailyLimits(userId, date);
+
+      // Verificar si se ha alcanzado el límite de visitas
+      if (limits.visit_count >= limits.visit_limit) {
+        return res.status(429).json({
+          success: false,
+          message: '❌ Límite diario de visitas alcanzado',
+          error: 'DAILY_LIMIT_EXCEEDED',
+          timestamp: new Date().toISOString(),
+          data: {
+            current: limits.visit_count,
+            limit: limits.visit_limit,
+            remaining: 0,
+            resetTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            recommendations: [
+              'Esperar hasta mañana para hacer más visitas',
+              'Revisar la estrategia de targeting',
+              'Optimizar el timing de las visitas'
+            ]
+          }
+        });
+      }
+
+      // ============================================================================
+      // LANZAR PROFILE VISITOR CON PHANTOMBUSTER
+      // ============================================================================
+      const profileVisitorConfig = {
+        profileUrl: profileUrl,
+        connectionDegree: connectionDegree
+      };
+
+      const launchResponse = await phantombusterService.launchProfileVisitor(
+        [profileUrl], // Array con una sola URL
+        {
+          connectionDegree: connectionDegree,
+          numberOfProfilesPerLaunch: 1
+        }
       );
+
+            if (!launchResponse.success) {
+        // Usar el nuevo sistema de parsing de errores
+        const errorInfo = phantombusterErrorParser.parsePhantombusterResponse(launchResponse);
+
+        if (errorInfo.hasError) {
+          // Guardar el error en la base de datos
+          const containerId = `profile_visitor_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          await phantombusterErrorParser.saveKnownError(errorInfo, containerId);
+
+          // Generar recomendaciones basadas en el tipo de error
+          const recommendations = phantombusterErrorParser.generateRecommendations(errorInfo.errorType);
+
+          // Determinar el código HTTP apropiado
+          let httpCode = 500;
+          if (errorInfo.errorType === 'credits_exhausted') httpCode = 402;
+          else if (errorInfo.errorType === 'authentication_error') httpCode = 401;
+          else if (errorInfo.errorType === 'permission_error') httpCode = 403;
+          else if (errorInfo.errorType === 'agent_not_found') httpCode = 404;
+          else if (errorInfo.errorType === 'rate_limit_error') httpCode = 429;
+
+          return res.status(httpCode).json({
+            success: false,
+            message: recommendations.title,
+            error: errorInfo.errorType.toUpperCase(),
+            errorCode: httpCode,
+            timestamp: new Date().toISOString(),
+            data: {
+              issue: errorInfo.errorType,
+              currentStatus: 'error_detected',
+              errorDetails: errorInfo.errorDetails,
+              containerId: containerId,
+              recommendations: recommendations.recommendations,
+              nextSteps: recommendations.nextSteps,
+              estimatedReset: recommendations.estimatedReset,
+              affectedAgents: recommendations.affectedAgents
+            }
+          });
+        }
+
+        throw new Error(launchResponse.message || 'Error lanzando Profile Visitor');
+      }
+
       const duration = Date.now() - startTime;
 
+      // ============================================================================
+      // INCREMENTAR CONTADOR DE VISITAS
+      // ============================================================================
+      await dbService.incrementVisitCount(userId, date);
+
+      // Obtener límites actualizados
+      const updatedLimits = await dbService.getCompleteDailyLimits(userId, date);
+
+      // ============================================================================
+      // REGISTRAR MÉTRICAS
+      // ============================================================================
       metricsCollector.recordPhantombusterProfileVisit(
-        result.success,
+        true,
         duration
       );
 
+      // ============================================================================
+      // RESPONSE EXITOSO
+      // ============================================================================
       res.json({
         success: true,
-        visitId: result.visitId,
-        profileUrl: result.profileUrl,
-        result: result.result,
-        message: result.message,
+        executionId: `profile_visitor_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        containerId: launchResponse.containerId,
+        status: "running",
+        message: "LinkedIn Profile Visitor iniciado exitosamente",
+        data: {
+          inputMode: "single",
+          profileUrl: profileUrl,
+          connectionDegree: connectionDegree,
+          profileCount: 1,
+          estimatedDuration: "30-60 segundos",
+          estimatedCompletionTime: new Date(Date.now() + 60000).toISOString(),
+          configuration: {
+            delayBetweenVisits: 3,
+            respectLinkedInLimits: true,
+            maxVisitsPerDay: 100
+          },
+          limits: {
+            current: updatedLimits.visit_count,
+            limit: updatedLimits.visit_limit,
+            remaining: updatedLimits.visit_limit - updatedLimits.visit_count,
+            usagePercentage: Math.round((updatedLimits.visit_count / updatedLimits.visit_limit) * 100)
+          }
+        },
+        timestamp: new Date().toISOString()
       });
+
     } catch (error) {
       console.error("❌ Error visitando perfil:", error);
       metricsCollector.recordError(
@@ -1416,6 +2200,7 @@ app.post(
         success: false,
         message: "Error visitando perfil",
         error: error.message,
+        timestamp: new Date().toISOString()
       });
     }
   }
@@ -1433,15 +2218,10 @@ app.get(
         `📥 Descargando contenedor usando fetch-result-object: ${containerId}`
       );
 
-      // Verificar si el containerId es válido
-      if (!containerId || containerId.length < 10) {
-        return res.status(400).json({
-          success: false,
-          message: "Container ID inválido",
-          error: "INVALID_CONTAINER_ID",
-          containerId,
-          timestamp: new Date().toISOString(),
-        });
+      // Validación optimizada usando utilidad
+      const validation = validateContainerId(containerId);
+      if (!validation.isValid) {
+        return res.status(400).json(validation.error);
       }
 
       // Usar el nuevo método con fetch-result-object
@@ -1654,6 +2434,20 @@ app.post(
 );
 
 // ============================================================================
+// RUTAS ESPECÍFICAS
+// ============================================================================
+
+// Rutas de LinkedIn Autoconnect
+app.use("/api/autoconnect", autoconnectRoutes);
+app.use("/api/message-sender", messageSenderRoutes);
+app.use("/api/autoconnect-monitoring", autoconnectMonitoringRoutes(autoconnectResponseMonitor));
+app.use("/api/limits", require("./routes/limits"));
+app.use("/api/phantombuster", require("./routes/phantombuster-status"));
+app.use("/api/known-errors", require("./routes/known-errors"));
+app.use("/api/domain-scraper", domainScraperRoutes);
+app.use("/api/axonaut", axonautRoutes);
+
+// ============================================================================
 // ENDPOINTS DE MONITOREO AUTOMÁTICO
 // ============================================================================
 
@@ -1774,6 +2568,10 @@ app.listen(PORT, () => {
   console.log(`📊 Métricas disponibles en /api/metrics`);
   console.log(`🔍 Health check en /api/health`);
   console.log(`⚙️ Configuración en /api/config`);
+
+  // Iniciar monitoreo de sesiones
+  console.log(`🍪 Iniciando monitoreo de cookies LinkedIn...`);
+  cookieManager.startMonitoring();
 });
 
 module.exports = app;

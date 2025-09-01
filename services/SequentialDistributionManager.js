@@ -109,8 +109,6 @@ class SequentialDistributionManager {
           priority: urlConfig.priority,
           sequence_order: i + 1,
           allocated_leads: urlConfig.distribution,
-          range_start: urlConfig.range.start,
-          range_end: urlConfig.range.end,
           // Guardar startPage y numberOfPage si están disponibles
           startPage: urlConfig.startPage,
           numberOfPage: urlConfig.numberOfPage,
@@ -182,10 +180,6 @@ class SequentialDistributionManager {
           url: nextUrlState.url_template,
           priority: nextUrlState.priority,
           distribution: nextUrlState.allocated_leads,
-          range: {
-            start: nextUrlState.range_start,
-            end: nextUrlState.range_end,
-          },
           sequenceOrder: nextUrlState.sequence_order,
         },
         currentOffset: existingSession.current_offset,
@@ -197,10 +191,7 @@ class SequentialDistributionManager {
     }
   }
 
-  // Función para calcular startPage basado en el rango
-  calculateStartPageForRange(rangeStart, rangeEnd, resultsPerPage = 25) {
-    return Math.floor(rangeStart / resultsPerPage) + 1;
-  }
+
 
   /**
    * Calcular distribución secuencial
@@ -227,64 +218,7 @@ class SequentialDistributionManager {
     );
 
     // Verificar si las URLs ya tienen rangos calculados (desde N8N)
-    const hasPreCalculatedRanges = urlsWithPriorities.some(
-      (url) =>
-        (url.rangeStart !== undefined && url.rangeEnd !== undefined) ||
-        (url.distribution_info &&
-          url.distribution_info.rangeStart !== undefined &&
-          url.distribution_info.rangeEnd !== undefined)
-    );
-
-    if (hasPreCalculatedRanges) {
-      console.log(`✅ Usando rangos pre-calculados desde N8N`);
-
-      // Usar rangos pre-calculados
-      const distribution = urlsWithPriorities.map((url, index) => {
-        // Extraer valores de distribution_info si existe, sino usar valores directos
-        const distributionInfo = url.distribution_info || {};
-        const rangeStart =
-          parseInt(distributionInfo.rangeStart || url.rangeStart) || 0;
-        const rangeEnd =
-          parseInt(distributionInfo.rangeEnd || url.rangeEnd) || 124;
-        const allocatedLeads = rangeEnd - rangeStart + 1;
-
-        const urlDistribution = {
-          id: url.id,
-          url: url.url_template || url.url, // Usar url_template de N8N o url como fallback
-          priority: url.prioridad || url.priority, // Usar prioridad de N8N o priority como fallback
-          distribution: allocatedLeads,
-          range: {
-            start: rangeStart,
-            end: rangeEnd,
-          },
-          offset: rangeStart,
-          limit: allocatedLeads,
-          sequenceOrder: index + 1,
-          // Preservar startPage y numberOfPage calculados en N8N
-          startPage: parseInt(distributionInfo.startPage || url.startPage) || 1,
-          numberOfPage:
-            parseInt(distributionInfo.numberOfPage || url.numberOfPage) || 5,
-        };
-
-        return urlDistribution;
-      });
-
-      console.log(
-        `✅ Distribución con rangos pre-calculados:`,
-        distribution.map((d) => ({
-          id: d.id,
-          priority: d.priority,
-          distribution: d.distribution,
-          range: `${d.range.start}-${d.range.end}`,
-          startPage: d.startPage,
-          numberOfPage: d.numberOfPage,
-        }))
-      );
-
-      return distribution;
-    }
-
-    // Si no hay rangos pre-calculados, usar distribución proporcional
+    // Distribución simplificada sin rangos pre-calculados
     console.log(`📊 Usando distribución proporcional por prioridad`);
 
     // Ordenar por prioridad
@@ -320,6 +254,9 @@ class SequentialDistributionManager {
         offset: currentOffset,
         limit: proportionalLeads,
         sequenceOrder: index + 1,
+        // Usar startPage y numberOfPage si están disponibles
+        startPage: parseInt(url.startPage) || 1,
+        numberOfPage: parseInt(url.numberOfPage) || 5,
       };
 
       distribution.push(urlDistribution);
@@ -327,16 +264,20 @@ class SequentialDistributionManager {
     });
 
     console.log(
-      `✅ Distribución proporcional calculada:`,
+      `✅ Distribución proporcional:`,
       distribution.map((d) => ({
         id: d.id,
         priority: d.priority,
         distribution: d.distribution,
         range: `${d.range.start}-${d.range.end}`,
+        startPage: d.startPage,
+        numberOfPage: d.numberOfPage,
       }))
     );
 
     return distribution;
+
+
   }
 
   /**
@@ -371,55 +312,39 @@ class SequentialDistributionManager {
         "running"
       );
 
-      // Configuración de indexación para esta URL
-      const indexingConfig = {
-        limit: nextUrlState.allocated_leads,
-        offset: nextUrlState.range_start,
-        format: "json",
-        sortBy: "relevance",
-        sortOrder: "desc",
-        includeMetadata: true,
-        deduplicate: true,
-        enrichData: true,
-      };
-
       console.log(
-        `🚀 Lanzando URL ${nextUrlState.url_id} con rango ${nextUrlState.range_start}-${nextUrlState.range_end}`
+        `🚀 Lanzando URL ${nextUrlState.url_id} con ${nextUrlState.allocated_leads} leads asignados`
       );
 
       // Lanzar agente con configuración específica
       // Usar startPage y numberOfPage pre-calculados si están disponibles
       let startPage, numberOfPage;
 
-      if (
-        nextUrlState.startPage !== undefined &&
-        nextUrlState.numberOfPage !== undefined
-      ) {
+      // PostgreSQL convierte nombres de columna a minúsculas
+      const dbStartPage = nextUrlState.startpage !== undefined ? nextUrlState.startpage : nextUrlState.startPage;
+      const dbNumberOfPage = nextUrlState.numberofpage !== undefined ? nextUrlState.numberofpage : nextUrlState.numberOfPage;
+
+      console.log(`🔍 DEBUG - Valores desde DB:`, {
+        'nextUrlState.startpage': nextUrlState.startpage,
+        'nextUrlState.numberofpage': nextUrlState.numberofpage,
+        'nextUrlState.startPage': nextUrlState.startPage,
+        'nextUrlState.numberOfPage': nextUrlState.numberOfPage,
+        dbStartPage,
+        dbNumberOfPage
+      });
+
+
         // Usar valores pre-calculados desde N8N
-        startPage = nextUrlState.startPage;
-        numberOfPage = nextUrlState.numberOfPage;
+        startPage = dbStartPage;
+        numberOfPage = dbNumberOfPage;
         console.log(
-          `✅ Usando startPage y numberOfPage pre-calculados: ${startPage}, ${numberOfPage}`
+          `✅ Usando startPage y numberOfPage pre-calculados desde N8N: startPage=${startPage}, numberOfPage=${numberOfPage}`
         );
-      } else {
-        // Calcular dinámicamente
-        startPage = this.calculateStartPageForRange(
-          nextUrlState.range_start,
-          nextUrlState.range_end
-        );
-        numberOfPage = Math.ceil(nextUrlState.allocated_leads / 25);
-        console.log(
-          `📊 Calculando startPage y numberOfPage dinámicamente: ${startPage}, ${numberOfPage}`
-        );
-      }
 
       // Usar parámetros del body o valores por defecto
-      const finalNumberOfResultsPerLaunch =
-        searchParams.numberOfResultsPerLaunch || nextUrlState.allocated_leads;
-      const finalNumberOfResultsPerSearch =
-        searchParams.numberOfResultsPerSearch || nextUrlState.allocated_leads;
-      const finalNumberOfLinesPerLaunch =
-        searchParams.numberOfLinesPerLaunch || 100;
+      const finalNumberOfResultsPerLaunch = searchParams.numberOfResultsPerLaunch || nextUrlState.allocated_leads;
+      const finalNumberOfResultsPerSearch = searchParams.numberOfResultsPerSearch || nextUrlState.allocated_leads;
+      const finalNumberOfLinesPerLaunch = searchParams.numberOfLinesPerLaunch || 100;
 
       console.log(`📊 Usando parámetros dinámicos del workflow:`);
       console.log(
@@ -438,8 +363,8 @@ class SequentialDistributionManager {
         await this.phantombusterService.launchSearchAgentWithUrl(
           nextUrlState.url_template,
           finalNumberOfResultsPerLaunch,
-          startPage,
-          numberOfPage
+          numberOfPage,  // Corregido: numberOfPage primero
+          startPage      // Corregido: startPage segundo
         );
 
       // Actualizar estado con container ID
@@ -470,10 +395,6 @@ class SequentialDistributionManager {
         sessionId,
         urlId: nextUrlState.url_id,
         containerId: launchResult.containerId,
-        range: {
-          start: nextUrlState.range_start,
-          end: nextUrlState.range_end,
-        },
         allocatedLeads: nextUrlState.allocated_leads,
         sequenceOrder: nextUrlState.sequence_order,
         remainingLeads: newRemaining,
@@ -502,15 +423,15 @@ class SequentialDistributionManager {
   }
 
   /**
-   * Descargar resultados con rango específico
+   * Descargar resultados sin filtro de rango específico
    */
   async downloadResultsWithSpecificRange(sessionId, urlId, containerId) {
     try {
       console.log(
-        `📥 Descargando resultados con rango específico: ${sessionId} - ${urlId}`
+        `📥 Descargando todos los resultados disponibles: ${sessionId} - ${urlId}`
       );
 
-      // Obtener configuración de rango
+      // Obtener configuración de URL (solo para validar que existe)
       const urlState = await this.dbService.getSequentialUrlState(
         sessionId,
         urlId
@@ -520,22 +441,17 @@ class SequentialDistributionManager {
         throw new Error(`Estado de URL no encontrado: ${urlId}`);
       }
 
-      // Configuración de indexación específica
+      // Configuración sin filtros de rango - obtener todos los resultados disponibles
       const indexingOptions = {
-        limit: urlState.allocated_leads,
-        offset: urlState.range_start,
+        limit: 1000, // Límite alto para obtener todos los resultados
+        offset: 0,   // Sin offset
         format: "json",
         sortBy: "relevance",
         sortOrder: "desc",
         includeMetadata: true,
         deduplicate: true,
         enrichData: true,
-        filters: {
-          rangeFilter: {
-            start: urlState.range_start,
-            end: urlState.range_end,
-          },
-        },
+        // Sin filtros de rango
       };
 
       // Descargar resultados usando el método mejorado
@@ -558,13 +474,12 @@ class SequentialDistributionManager {
           urlId,
           containerId,
           resultsCount: results.results.length,
-          range: urlState.range_start + "-" + urlState.range_end,
           status: "completed",
           timestamp: new Date().toISOString(),
         });
 
         console.log(
-          `✅ Resultados descargados: ${results.results.length} leads en rango ${urlState.range_start}-${urlState.range_end}`
+          `✅ Resultados descargados: ${results.results.length} leads (todos los disponibles)`
         );
 
         return {
@@ -573,12 +488,9 @@ class SequentialDistributionManager {
           metadata: {
             sessionId,
             urlId,
-            range: {
-              start: urlState.range_start,
-              end: urlState.range_end,
-            },
-            resultsInRange: results.results.length,
+            resultsCount: results.results.length,
             expectedResults: urlState.allocated_leads,
+            note: "Se obtuvieron todos los resultados disponibles"
           },
         };
       } else {
@@ -633,7 +545,6 @@ class SequentialDistributionManager {
           sequenceOrder: url.sequence_order,
           allocatedLeads: url.allocated_leads,
           resultsCount: url.results_count,
-          range: `${url.range_start}-${url.range_end}`,
           containerId: url.container_id,
         })),
       };
@@ -652,389 +563,161 @@ class SequentialDistributionManager {
     try {
       console.log(`📥 Obteniendo resultados con indexación: ${containerId}`);
 
-      // Parámetros de indexación por defecto
-      const defaultOptions = {
-        limit: 100,
-        offset: 0,
-        format: "json",
-        sortBy: "relevance",
-        sortOrder: "desc",
-        includeMetadata: true,
-        deduplicate: true,
-        enrichData: true,
-        filters: {},
-        pagination: {
-          page: 1,
-          pageSize: 50,
-          autoPaginate: true,
-          maxPages: 20,
-        },
-      };
+      // Usar el método estándar de PhantombusterService en lugar de indexación personalizada
+      console.log(`🔄 Usando método estándar de PhantombusterService...`);
 
-      // Combinar opciones
-      const indexingOptions = { ...defaultOptions, ...options };
+      // Intentar primero con getAgentResultsWithFetchResultObject
+      try {
+        const fetchResultObjectResult = await this.phantombusterService.getAgentResultsWithFetchResultObject(containerId);
 
-      console.log(
-        `⚙️ Opciones de indexación:`,
-        JSON.stringify(indexingOptions, null, 2)
-      );
+        if (fetchResultObjectResult.success) {
+          console.log(`✅ Resultados obtenidos con fetch-result-object: ${fetchResultObjectResult.results.length} perfiles`);
 
-      // Construir parámetros de query
-      const queryParams = {
-        id: containerId,
-        limit: indexingOptions.limit,
-        offset: indexingOptions.offset,
-        format: indexingOptions.format,
-        sortBy: indexingOptions.sortBy,
-        sortOrder: indexingOptions.sortOrder,
-        includeMetadata: indexingOptions.includeMetadata,
-        deduplicate: indexingOptions.deduplicate,
-        enrichData: indexingOptions.enrichData,
-        ...indexingOptions.filters,
-      };
+          // Aplicar filtros de rango si se especifican
+          let filteredResults = fetchResultObjectResult.results;
 
-      // Realizar petición con indexación
-      const response = await axios.get(
-        `${this.baseUrl}/containers/fetch-result-object`,
-        {
-          headers: {
-            "X-Phantombuster-Key": this.phantombusterService.apiKey,
-            "Content-Type": "application/json",
-          },
-          params: queryParams,
-          timeout: 60000, // 60 segundos de timeout para indexación
-        }
-      );
+          if (options.filters && options.filters.rangeFilter) {
+            const { start, end } = options.filters.rangeFilter;
+            console.log(`🔍 Aplicando filtro de rango: ${start}-${end}`);
 
-      console.log(`✅ Respuesta de indexación recibida`);
-
-      // Procesar respuesta con indexación
-      if (response.data && response.data.resultObject) {
-        let results;
-
-        console.log(`🔍 Estructura de response.data:`, {
-          hasResultObject: !!response.data.resultObject,
-          resultObjectType: typeof response.data.resultObject,
-          isString: typeof response.data.resultObject === "string",
-          isArray: Array.isArray(response.data.resultObject),
-          keys:
-            typeof response.data.resultObject === "object"
-              ? Object.keys(response.data.resultObject)
-              : null,
-        });
-
-        // Parsear resultados
-        if (typeof response.data.resultObject === "string") {
-          try {
-            results = JSON.parse(response.data.resultObject);
-            console.log(
-              `✅ Resultados indexados parseados: ${
-                Array.isArray(results) ? results.length : "no es array"
-              } perfiles`
-            );
-          } catch (parseError) {
-            console.error(
-              `❌ Error parseando resultados indexados:`,
-              parseError.message
-            );
-            throw new Error("Error parseando resultados JSON indexados");
-          }
-        } else if (Array.isArray(response.data.resultObject)) {
-          results = response.data.resultObject;
-          console.log(
-            `✅ Resultados indexados obtenidos directamente: ${results.length} perfiles`
-          );
-        } else if (typeof response.data.resultObject === "object") {
-          // El resultObject es un objeto, verificar si tiene una propiedad que contenga el array
-          console.log(
-            `🔍 resultObject es objeto, explorando propiedades:`,
-            Object.keys(response.data.resultObject)
-          );
-
-          // Buscar posibles propiedades que contengan los resultados
-          const possibleArrayKeys = [
-            "results",
-            "data",
-            "profiles",
-            "items",
-            "leads",
-          ];
-          let foundArray = null;
-
-          for (const key of possibleArrayKeys) {
-            if (
-              response.data.resultObject[key] &&
-              Array.isArray(response.data.resultObject[key])
-            ) {
-              foundArray = response.data.resultObject[key];
-              console.log(
-                `✅ Array encontrado en propiedad '${key}': ${foundArray.length} elementos`
-              );
-              break;
-            }
+            filteredResults = fetchResultObjectResult.results.slice(start, end + 1);
+            console.log(`✅ Resultados filtrados por rango: ${filteredResults.length} perfiles`);
           }
 
-          if (foundArray) {
-            results = foundArray;
-          } else {
-            // Verificar si el objeto contiene URLs de resultados (caso especial de Phantombuster)
-            if (
-              response.data.resultObject.csvURL ||
-              response.data.resultObject.jsonUrl
-            ) {
-              console.log(
-                `🔗 Objeto contiene URLs de resultados, intentando descargar desde:`,
-                response.data.resultObject.jsonUrl ||
-                  response.data.resultObject.csvURL
-              );
+          // Corregir connectionDegree en los resultados
+          const correctedResults = filteredResults.map(result => ({
+            ...result,
+            connectionDegree: this.correctConnectionDegree(result.connectionDegree)
+          }));
 
-              // Intentar descargar desde la URL JSON primero, luego CSV como fallback
-              let downloadUrl =
-                response.data.resultObject.jsonUrl ||
-                response.data.resultObject.csvURL;
-
-              try {
-                const downloadResponse = await axios.get(downloadUrl, {
-                  timeout: 30000,
-                  headers: {
-                    "User-Agent":
-                      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                  },
-                });
-
-                if (downloadResponse.data) {
-                  // Intentar parsear como JSON
-                  let downloadedData = downloadResponse.data;
-                  if (typeof downloadedData === "string") {
-                    try {
-                      downloadedData = JSON.parse(downloadedData);
-                    } catch (parseError) {
-                      console.log(
-                        `⚠️ No se pudo parsear como JSON, tratando como CSV`
-                      );
-                      // Aquí podrías agregar lógica para parsear CSV si es necesario
-                      throw new Error(
-                        "Formato de datos descargados no soportado"
-                      );
-                    }
-                  }
-
-                  if (Array.isArray(downloadedData)) {
-                    results = downloadedData;
-                    console.log(
-                      `✅ Datos descargados exitosamente: ${results.length} perfiles`
-                    );
-                  } else {
-                    throw new Error("Datos descargados no son un array");
-                  }
-                } else {
-                  throw new Error(
-                    "No se pudieron descargar datos desde la URL"
-                  );
-                }
-              } catch (downloadError) {
-                console.error(
-                  `❌ Error descargando datos desde URL:`,
-                  downloadError.message
-                );
-                throw new Error(
-                  `Error descargando resultados: ${downloadError.message}`
-                );
-              }
-            } else {
-              // Si no encontramos un array en propiedades conocidas, usar todo el objeto como array de un elemento
-              console.log(
-                `⚠️ No se encontró array en propiedades conocidas, tratando objeto como resultado único`
-              );
-              results = [response.data.resultObject];
-            }
-          }
-        } else {
-          results = response.data.resultObject;
-          console.log(
-            `✅ Resultados indexados obtenidos: ${
-              Array.isArray(results)
-                ? results.length
-                : "tipo: " + typeof results
-            } perfiles`
-          );
+          return {
+            success: true,
+            results: correctedResults,
+            message: "Resultados obtenidos exitosamente con fetch-result-object",
+            data: fetchResultObjectResult.data,
+            metadata: {
+              containerId,
+              totalResults: correctedResults.length,
+              originalResults: fetchResultObjectResult.results.length,
+              filters: options.filters,
+              timestamp: new Date().toISOString(),
+              source: "fetch_result_object_standard",
+            },
+            source: "fetch_result_object_standard",
+          };
         }
-
-        // Verificar si results es un objeto con URLs (caso especial después de parsear JSON string)
-        if (!Array.isArray(results) && typeof results === "object") {
-          // Verificar si el objeto contiene URLs de resultados (caso especial de Phantombuster)
-          if (results.csvURL || results.jsonUrl) {
-            console.log(
-              `🔗 Objeto parseado contiene URLs de resultados, intentando descargar desde:`,
-              results.jsonUrl || results.csvURL
-            );
-
-            // Intentar descargar desde la URL JSON primero, luego CSV como fallback
-            let downloadUrl = results.jsonUrl || results.csvURL;
-
-            try {
-              const downloadResponse = await axios.get(downloadUrl, {
-                timeout: 30000,
-                headers: {
-                  "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                },
-              });
-
-              if (downloadResponse.data) {
-                // Intentar parsear como JSON
-                let downloadedData = downloadResponse.data;
-                if (typeof downloadedData === "string") {
-                  try {
-                    downloadedData = JSON.parse(downloadedData);
-                  } catch (parseError) {
-                    console.log(
-                      `⚠️ No se pudo parsear como JSON, tratando como CSV`
-                    );
-                    // Aquí podrías agregar lógica para parsear CSV si es necesario
-                    throw new Error(
-                      "Formato de datos descargados no soportado"
-                    );
-                  }
-                }
-
-                if (Array.isArray(downloadedData)) {
-                  results = downloadedData;
-                  console.log(
-                    `✅ Datos descargados exitosamente: ${results.length} perfiles`
-                  );
-                } else {
-                  throw new Error("Datos descargados no son un array");
-                }
-              } else {
-                throw new Error("No se pudieron descargar datos desde la URL");
-              }
-            } catch (downloadError) {
-              console.error(
-                `❌ Error descargando datos desde URL:`,
-                downloadError.message
-              );
-              throw new Error(
-                `Error descargando resultados: ${downloadError.message}`
-              );
-            }
-          }
-        }
-
-        // Validar y procesar resultados
-        if (!Array.isArray(results)) {
-          console.error(
-            `❌ Los resultados indexados no son un array:`,
-            typeof results,
-            `Valor:`,
-            JSON.stringify(results, null, 2).substring(0, 500)
-          );
-          throw new Error("Formato de resultados indexados inválido");
-        }
-
-        // Aplicar filtros adicionales si se especifican
-        if (
-          indexingOptions.filters &&
-          Object.keys(indexingOptions.filters).length > 0
-        ) {
-          results = this.applyIndexingFilters(results, indexingOptions.filters);
-          console.log(
-            `🔍 Resultados después de filtros: ${results.length} perfiles`
-          );
-        }
-
-        // Aplicar deduplicación si está habilitada
-        if (indexingOptions.deduplicate) {
-          results = this.deduplicateResults(results);
-          console.log(
-            `🔄 Resultados después de deduplicación: ${results.length} perfiles`
-          );
-        }
-
-        // Enriquecer datos si está habilitado
-        if (indexingOptions.enrichData) {
-          results = this.enrichResultsData(results);
-          console.log(`📊 Resultados enriquecidos: ${results.length} perfiles`);
-        }
-
-        // Metadata de indexación
-        const indexingMetadata = {
-          containerId,
-          totalResults: results.length,
-          indexingOptions,
-          queryParams,
-          timestamp: new Date().toISOString(),
-          source: "fetch_result_object_indexed",
-          pagination: {
-            currentPage: indexingOptions.pagination.page,
-            pageSize: indexingOptions.pagination.pageSize,
-            hasMore: results.length >= indexingOptions.limit,
-            totalPages: Math.ceil(
-              results.length / indexingOptions.pagination.pageSize
-            ),
-          },
-        };
-
-        return {
-          success: true,
-          results,
-          message: "Resultados indexados obtenidos exitosamente",
-          data: response.data,
-          metadata: indexingMetadata,
-          source: "fetch_result_object_indexed",
-        };
-      } else if (response.data && Array.isArray(response.data)) {
-        // Respuesta directa como array
-        console.log(
-          `✅ Resultados indexados (array directo): ${response.data.length} perfiles`
-        );
-
-        return {
-          success: true,
-          results: response.data,
-          message: "Resultados indexados obtenidos (array directo)",
-          data: response.data,
-          metadata: {
-            containerId,
-            totalResults: response.data.length,
-            indexingOptions,
-            timestamp: new Date().toISOString(),
-            source: "fetch_result_object_indexed_array",
-          },
-          source: "fetch_result_object_indexed_array",
-        };
-      } else {
-        console.log(`⚠️ No se encontraron resultados indexados`);
-        return {
-          success: false,
-          results: [],
-          message: "No se encontraron resultados indexados",
-          data: response.data,
-          metadata: {
-            containerId,
-            indexingOptions,
-            timestamp: new Date().toISOString(),
-            source: "fetch_result_object_indexed_empty",
-          },
-          source: "fetch_result_object_indexed_empty",
-        };
+      } catch (fetchError) {
+        console.log(`⚠️ fetch-result-object falló: ${fetchError.message}`);
       }
+
+      // Si fetch-result-object falla, intentar con getAgentResultsDirectly
+      try {
+        const directResults = await this.phantombusterService.getAgentResultsDirectly(containerId);
+
+        if (directResults.success) {
+          console.log(`✅ Resultados obtenidos con método directo: ${directResults.results.length} perfiles`);
+
+          // Aplicar filtros de rango si se especifican
+          let filteredResults = directResults.results;
+
+          if (options.filters && options.filters.rangeFilter) {
+            const { start, end } = options.filters.rangeFilter;
+            console.log(`🔍 Aplicando filtro de rango: ${start}-${end}`);
+
+            filteredResults = directResults.results.slice(start, end + 1);
+            console.log(`✅ Resultados filtrados por rango: ${filteredResults.length} perfiles`);
+          }
+
+          // Corregir connectionDegree en los resultados
+          const correctedResults = filteredResults.map(result => ({
+            ...result,
+            connectionDegree: this.correctConnectionDegree(result.connectionDegree)
+          }));
+
+          return {
+            success: true,
+            results: correctedResults,
+            message: "Resultados obtenidos exitosamente con método directo",
+            data: directResults.data,
+            metadata: {
+              containerId,
+              totalResults: correctedResults.length,
+              originalResults: directResults.results.length,
+              filters: options.filters,
+              timestamp: new Date().toISOString(),
+              source: "direct_fetch_standard",
+            },
+            source: "direct_fetch_standard",
+          };
+        }
+      } catch (directError) {
+        console.log(`⚠️ método directo falló: ${directError.message}`);
+      }
+
+      // Si ambos métodos fallan, intentar con S3
+      try {
+        const s3Results = await this.phantombusterService.getResultsFromS3(containerId);
+
+        if (s3Results.success) {
+          console.log(`✅ Resultados obtenidos desde S3: ${s3Results.results.length} perfiles`);
+
+          // Aplicar filtros de rango si se especifican
+          let filteredResults = s3Results.results;
+
+          if (options.filters && options.filters.rangeFilter) {
+            const { start, end } = options.filters.rangeFilter;
+            console.log(`🔍 Aplicando filtro de rango: ${start}-${end}`);
+
+            filteredResults = s3Results.results.slice(start, end + 1);
+            console.log(`✅ Resultados filtrados por rango: ${filteredResults.length} perfiles`);
+          }
+
+          // Corregir connectionDegree en los resultados
+          const correctedResults = filteredResults.map(result => ({
+            ...result,
+            connectionDegree: this.correctConnectionDegree(result.connectionDegree)
+          }));
+
+          return {
+            success: true,
+            results: correctedResults,
+            message: "Resultados obtenidos exitosamente desde S3",
+            data: s3Results.data,
+            metadata: {
+              containerId,
+              totalResults: correctedResults.length,
+              originalResults: s3Results.results.length,
+              filters: options.filters,
+              timestamp: new Date().toISOString(),
+              source: "s3_fallback_standard",
+            },
+            source: "s3_fallback_standard",
+          };
+        }
+      } catch (s3Error) {
+        console.log(`⚠️ S3 falló: ${s3Error.message}`);
+      }
+
+      // Si todos los métodos fallan
+      console.log(`❌ Todos los métodos de obtención de resultados fallaron`);
+      return {
+        success: false,
+        results: [],
+        message: "No se pudieron obtener resultados con ningún método disponible",
+        data: null,
+        metadata: {
+          containerId,
+          timestamp: new Date().toISOString(),
+          source: "all_methods_failed",
+        },
+        source: "all_methods_failed",
+      };
+
     } catch (error) {
       console.error(
         `❌ Error obteniendo resultados indexados para ${containerId}:`,
         error.message
       );
-
-      // Fallback a método anterior
-      if (
-        error.response &&
-        (error.response.status === 404 || error.response.status === 400)
-      ) {
-        console.log(`🔄 Intentando método alternativo para ${containerId}...`);
-        return await this.phantombusterService.getAgentResultsWithFetchResultObject(
-          containerId
-        );
-      }
 
       throw error;
     }
@@ -1155,7 +838,7 @@ class SequentialDistributionManager {
             result.lastName || result.fullName.split(" ").slice(1).join(" "),
           title: result.currentJobTitle || result.title || "Unknown",
           location: result.location || "Unknown",
-          connectionDegree: result.connectionDegree || "Unknown",
+          connectionDegree: this.correctConnectionDegree(result.connectionDegree) || "Unknown",
         };
       }
 
@@ -1169,6 +852,21 @@ class SequentialDistributionManager {
 
       return enriched;
     });
+  }
+
+  /**
+   * Método para corregir connectionDegree
+   * Cambia "3rd" por "3rd+" para cumplir con la restricción de la base de datos
+   */
+  correctConnectionDegree(degree) {
+    if (!degree) return degree;
+
+    // Si es "3rd", cambiarlo a "3rd+"
+    if (degree === "3rd") {
+      return "3rd+";
+    }
+
+    return degree;
   }
 }
 

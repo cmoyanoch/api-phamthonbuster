@@ -116,6 +116,117 @@ class MetricsCollector {
     this.updateAverageProfileVisitDuration(duration);
   }
 
+  // Métricas de Phantombuster Autoconnect
+  recordPhantombusterAutoconnect(success, duration) {
+    // Inicializar si no existe
+    if (!this.metrics.phantombuster.autoconnect) {
+      this.metrics.phantombuster.autoconnect = {
+        total: 0,
+        successful: 0,
+        failed: 0,
+        averageDuration: 0
+      };
+    }
+
+    this.metrics.phantombuster.autoconnect.total++;
+
+    if (success) {
+      this.metrics.phantombuster.autoconnect.successful++;
+    } else {
+      this.metrics.phantombuster.autoconnect.failed++;
+    }
+
+    this.updateAverageAutoconnectDuration(duration);
+  }
+
+  updateAverageAutoconnectDuration(newDuration) {
+    if (!this.metrics.phantombuster.autoconnect) return;
+    
+    const total = this.metrics.phantombuster.autoconnect.total;
+    const currentAvg = this.metrics.phantombuster.autoconnect.averageDuration;
+    
+    this.metrics.phantombuster.autoconnect.averageDuration = 
+      ((currentAvg * (total - 1)) + newDuration) / total;
+  }
+
+  // Métricas de Phantombuster Message Sender
+  recordPhantombusterMessageSender(success, duration) {
+    // Inicializar si no existe
+    if (!this.metrics.phantombuster.messageSender) {
+      this.metrics.phantombuster.messageSender = {
+        total: 0,
+        successful: 0,
+        failed: 0,
+        averageDuration: 0
+      };
+    }
+
+    this.metrics.phantombuster.messageSender.total++;
+
+    if (success) {
+      this.metrics.phantombuster.messageSender.successful++;
+    } else {
+      this.metrics.phantombuster.messageSender.failed++;
+    }
+
+    this.updateAverageMessageSenderDuration(duration);
+  }
+
+  updateAverageMessageSenderDuration(newDuration) {
+    if (!this.metrics.phantombuster.messageSender) return;
+    
+    const total = this.metrics.phantombuster.messageSender.total;
+    const currentAvg = this.metrics.phantombuster.messageSender.averageDuration;
+    
+    this.metrics.phantombuster.messageSender.averageDuration = 
+      ((currentAvg * (total - 1)) + newDuration) / total;
+  }
+
+  // Métricas de Domain Scraping
+  recordDomainScraping(success, duration) {
+    // Inicializar si no existe
+    if (!this.metrics.domainScraping) {
+      this.metrics.domainScraping = {
+        total: 0,
+        successful: 0,
+        failed: 0,
+        averageDuration: 0
+      };
+    }
+
+    this.metrics.domainScraping.total++;
+
+    if (success) {
+      this.metrics.domainScraping.successful++;
+    } else {
+      this.metrics.domainScraping.failed++;
+    }
+
+    this.updateAverageDomainScrapingDuration(duration);
+  }
+
+  updateAverageDomainScrapingDuration(newDuration) {
+    if (!this.metrics.domainScraping) return;
+    
+    const total = this.metrics.domainScraping.total;
+    const currentAvg = this.metrics.domainScraping.averageDuration;
+    
+    this.metrics.domainScraping.averageDuration = 
+      ((currentAvg * (total - 1)) + newDuration) / total;
+  }
+
+  recordPhantombusterProfileVisitContinued(success, duration) {
+    this.metrics.phantombuster.profileVisits.total++;
+
+    if (success) {
+      this.metrics.phantombuster.profileVisits.successful++;
+    } else {
+      this.metrics.phantombuster.profileVisits.failed++;
+    }
+
+    this.updateAverageProfileVisitDuration(duration);
+  }
+
   // Métricas de cookies
   recordCookieValidation(success, renewed = false) {
     this.metrics.cookies.validations.total++;

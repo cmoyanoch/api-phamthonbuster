@@ -245,8 +245,6 @@ class DatabaseService {
           priority INTEGER NOT NULL,
           sequence_order INTEGER NOT NULL,
           allocated_leads INTEGER NOT NULL,
-          range_start INTEGER NOT NULL,
-          range_end INTEGER NOT NULL,
           container_id VARCHAR(255) NULL,
           status VARCHAR(50) DEFAULT 'pending',
           results_count INTEGER DEFAULT 0,
@@ -661,6 +659,81 @@ class DatabaseService {
       return result.rows[0];
     } catch (error) {
       console.error("❌ Error incrementando contador de búsquedas:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Incrementar contador de conexiones (Autoconnect)
+   */
+  async incrementConnectionCount(userId, date) {
+    try {
+      const client = await this.pgPool.connect();
+
+      const query = `
+        INSERT INTO phantombuster.daily_limits (user_id, date, connection_count)
+        VALUES ($1, $2, 1)
+        ON CONFLICT (user_id, date)
+        DO UPDATE SET
+          connection_count = phantombuster.daily_limits.connection_count + 1,
+          updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+      `;
+
+      const result = await client.query(query, [userId, date]);
+      client.release();
+
+      return result.rows[0];
+    } catch (error) {
+      console.error("❌ Error incrementando contador de conexiones:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Incrementar contador de mensajes (Message Sender)
+   */
+  async incrementMessageCount(userId, date) {
+    try {
+      const client = await this.pgPool.connect();
+
+      const query = `
+        INSERT INTO phantombuster.daily_limits (user_id, date, message_count)
+        VALUES ($1, $2, 1)
+        ON CONFLICT (user_id, date)
+        DO UPDATE SET
+          message_count = phantombuster.daily_limits.message_count + 1,
+          updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+      `;
+
+      const result = await client.query(query, [userId, date]);
+      client.release();
+
+      return result.rows[0];
+    } catch (error) {
+      console.error("❌ Error incrementando contador de mensajes:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Obtener límites completos diarios
+   */
+  async getCompleteDailyLimits(userId, date) {
+    try {
+      const client = await this.pgPool.connect();
+
+      const query = `
+        SELECT * FROM get_complete_daily_limits($1, $2)
+      `;
+
+      const result = await client.query(query, [userId, date]);
+      client.release();
+
+      return result.rows[0];
+    } catch (error) {
+      console.error("❌ Error obteniendo límites completos diarios:", error);
       throw error;
     }
   }
@@ -1086,6 +1159,13 @@ class DatabaseService {
       const client = await this.pgPool.connect();
 
       // Validar y limpiar valores para evitar NaN
+      console.log(`🔍 DEBUG - Guardando urlState con valores originales:`, {
+        startPage: urlState.startPage,
+        numberOfPage: urlState.numberOfPage,
+        startPageType: typeof urlState.startPage,
+        numberOfPageType: typeof urlState.numberOfPage
+      });
+
       const cleanUrlState = {
         session_id: urlState.session_id,
         url_id: parseInt(urlState.url_id) || 0,
@@ -1093,8 +1173,6 @@ class DatabaseService {
         priority: parseInt(urlState.priority) || 3,
         sequence_order: parseInt(urlState.sequence_order) || 1,
         allocated_leads: parseInt(urlState.allocated_leads) || 125,
-        range_start: parseInt(urlState.range_start) || 0,
-        range_end: parseInt(urlState.range_end) || 124,
         status: urlState.status || "pending",
         container_id: urlState.container_id || null,
         results_count: parseInt(urlState.results_count) || 0,
@@ -1102,14 +1180,19 @@ class DatabaseService {
         numberOfPage: parseInt(urlState.numberOfPage) || 5,
       };
 
+      console.log(`🔍 DEBUG - Valores limpiados para DB:`, {
+        startPage: cleanUrlState.startPage,
+        numberOfPage: cleanUrlState.numberOfPage
+      });
+
       // Valores limpios para la base de datos
 
       const query = `
         INSERT INTO phantombuster.sequential_url_states (
           session_id, url_id, url_template, priority, sequence_order,
-          allocated_leads, range_start, range_end, status, container_id, results_count,
+          allocated_leads, status, container_id, results_count,
           startpage, numberofpage
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         ON CONFLICT (session_id, url_id) DO UPDATE SET
           updated_at = CURRENT_TIMESTAMP,
           status = EXCLUDED.status,
@@ -1126,8 +1209,6 @@ class DatabaseService {
         cleanUrlState.priority,
         cleanUrlState.sequence_order,
         cleanUrlState.allocated_leads,
-        cleanUrlState.range_start,
-        cleanUrlState.range_end,
         cleanUrlState.status,
         cleanUrlState.container_id,
         cleanUrlState.results_count,
@@ -1160,6 +1241,17 @@ class DatabaseService {
 
       const result = await client.query(query, [sessionId]);
       client.release();
+
+      // Debug logs para ver qué valores se están retornando desde la DB
+      result.rows.forEach(row => {
+        console.log(`🔍 DEBUG - URL State desde DB:`, {
+          url_id: row.url_id,
+          startPage: row.startpage,
+          numberOfPage: row.numberofpage,
+          startPageType: typeof row.startpage,
+          numberOfPageType: typeof row.numberofpage
+        });
+      });
 
       return result.rows;
     } catch (error) {

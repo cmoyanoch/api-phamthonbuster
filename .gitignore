@@ -1,0 +1,90 @@
+# ============================================================================
+# GITIGNORE - API PHANTOMBUSTER
+# ============================================================================
+
+# Dependencias
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Variables de entorno
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Archivos de runtime
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Cobertura de tests
+coverage/
+*.lcov
+
+# Archivos temporales
+.tmp/
+.temp/
+*.tmp
+*.temp
+
+# Archivos de backup
+*.bak
+*.backup
+backup_*.json
+
+# Archivos de configuración local
+config.local.js
+config.local.json
+
+# Archivos de cookies y datos sensibles
+cookies.json
+backup_cookies.json
+session_data.json
+
+# Archivos de reportes de testing
+connectivity-test-report.json
+test-results.json
+
+# Archivos de Docker
+.dockerignore
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Archivos de SSL
+ssl/
+*.pem
+*.key
+*.crt
+
+# Archivos de base de datos
+*.sqlite
+*.db
+
+# Archivos de caché
+.cache/
+.parcel-cache/
+
+# Archivos de build
+dist/
+build/
