@@ -62,15 +62,27 @@ cleanup_docker_before() {
 cleanup_docker_after() {
     print_status "🧹 Limpieza post-compilación..."
 
-    # Eliminar imágenes sin etiqueta generadas (con timeout)
-    local dangling_images=$(docker images -f "dangling=true" -q)
-    if [ ! -z "$dangling_images" ]; then
-        timeout 30 docker rmi $dangling_images 2>/dev/null || print_warning "⚠️ Algunas imágenes no se pudieron eliminar"
+    # Eliminar imágenes sin etiqueta generadas (con timeout y manejo robusto)
+    print_status "Eliminando imágenes sin etiqueta..."
+    local dangling_images=$(timeout 10 docker images -f "dangling=true" -q 2>/dev/null || echo "")
+    if [ ! -z "$dangling_images" ] && [ "$dangling_images" != "" ]; then
+        # Procesar en lotes de 5 imágenes para evitar problemas
+        echo "$dangling_images" | head -10 | xargs -r -n 5 timeout 20 docker rmi 2>/dev/null || print_warning "⚠️ Algunas imágenes no se pudieron eliminar"
+    else
+        print_status "No hay imágenes sin etiqueta para eliminar"
     fi
 
-    # Limpiar caché de build (con timeout y force)
+    # Limpiar caché de build (con timeout reducido y manejo de errores mejorado)
     print_status "Limpiando caché de build..."
-    timeout 60 docker builder prune -f --filter "until=24h" 2>/dev/null || print_warning "⚠️ Limpieza de caché interrumpida"
+    if timeout 30 docker builder prune -f --filter "until=1h" >/dev/null 2>&1; then
+        print_status "✅ Caché de build limpiado"
+    else
+        print_warning "⚠️ Limpieza de caché omitida (puede estar en uso)"
+    fi
+
+    # Limpiar imágenes huérfanas de forma segura
+    print_status "Limpieza final de sistema..."
+    timeout 20 docker image prune -f --filter "until=1h" >/dev/null 2>&1 || true
 
     print_success "✅ Limpieza post-compilación completada"
 }
