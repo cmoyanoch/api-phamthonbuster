@@ -474,8 +474,8 @@ router.delete('/companies/:id', authenticateApiKey, async (req, res) => {
  */
 router.get('/test-connection', authenticateApiKey, async (req, res) => {
   try {
-    // Intentar obtener la lista de empresas para probar la conexión
-    await makeAxonautRequest('/companies', 'GET');
+    // Intentar obtener la lista de empresas con paginación para probar la conexión
+    await makeAxonautRequest('/companies?page=1&limit=1', 'GET');
 
     logInfo('Conexión con Axonaut exitosa');
 
