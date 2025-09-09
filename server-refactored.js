@@ -45,7 +45,7 @@ app.use(compression());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Limitación de velocidad
+// Limitación de velocidad - Excluir tráfico interno de Docker
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 100, // máximo 100 requests por ventana
@@ -55,6 +55,49 @@ const limiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Excluir requests desde containers de Docker y redes internas
+  skip: (req) => {
+    const clientIP = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'];
+    
+    // Redes internas de Docker y contenedores
+    const internalNetworks = [
+      '172.',      // Docker bridge networks
+      '192.168.',  // Private networks
+      '10.',       // Private networks
+      '127.',      // Localhost
+      '::1',       // IPv6 localhost
+      'localhost'  // Hostname localhost
+    ];
+    
+    // Hostnames de contenedores Docker
+    const dockerHosts = [
+      'phantombuster-api',
+      'webapp_nextjs',
+      'server_europbot-n8n-1',
+      'n8n',
+      'redis',
+      'traefik'
+    ];
+    
+    // Verificar si es una IP interna
+    const isInternalIP = internalNetworks.some(network => 
+      clientIP && clientIP.toString().startsWith(network)
+    );
+    
+    // Verificar hostname interno
+    const hostname = req.hostname || req.get('host') || '';
+    const isInternalHost = dockerHosts.some(host => 
+      hostname.includes(host)
+    );
+    
+    // Skip rate limiting para tráfico interno
+    if (isInternalIP || isInternalHost) {
+      console.log(`🔄 Rate limiting skipped for internal request from: ${clientIP} (${hostname})`);
+      return true;
+    }
+    
+    return false;
+  }
 });
 app.use(limiter);
 

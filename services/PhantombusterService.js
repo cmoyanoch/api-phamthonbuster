@@ -3,6 +3,43 @@ const LinkedInCookieManager = require("../cookie-manager");
 const fs = require("fs");
 const path = require("path");
 
+// Clase para manejo de Rate Limiting con Backoff Exponencial
+class RateLimitHandler {
+  constructor() {
+    this.retryAttempts = new Map();
+    this.baseDelay = 1000; // 1 segundo
+    this.maxDelay = 300000; // 5 minutos
+  }
+
+  async handleRateLimit(operation, retryCount = 0) {
+    if (retryCount >= 3) {
+      throw new Error('Máximo de reintentos alcanzado');
+    }
+
+    const delay = Math.min(
+      this.baseDelay * Math.pow(2, retryCount),
+      this.maxDelay
+    );
+
+    console.log(`🚨 Rate limit detectado. Esperando ${delay}ms antes del reintento ${retryCount + 1}`);
+    
+    await new Promise(resolve => setTimeout(resolve, delay));
+    
+    return this.executeWithRetry(operation, retryCount + 1);
+  }
+
+  async executeWithRetry(operation, retryCount = 0) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error.response?.status === 429) {
+        return this.handleRateLimit(operation, retryCount);
+      }
+      throw error;
+    }
+  }
+}
+
 // Circuit Breaker para manejar fallos de conectividad
 class CircuitBreaker {
   constructor(failureThreshold = 5, resetTimeout = 60000) {
@@ -164,12 +201,13 @@ class PhantombusterService {
     this.logsDir = path.join(__dirname, "../logs");
     this.ensureLogsDirectory();
 
-    // Inicializar circuit breaker y monitor de conectividad
+    // Inicializar circuit breaker, monitor de conectividad y rate limit handler
     this.circuitBreaker = new CircuitBreaker(
       parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD) || 5,
       parseInt(process.env.CIRCUIT_BREAKER_TIMEOUT) || 60000
     );
     this.connectivityMonitor = new ConnectivityMonitor();
+    this.rateLimitHandler = new RateLimitHandler();
 
     // Configuración mejorada de axios
     this.axiosConfig = {
@@ -228,6 +266,11 @@ class PhantombusterService {
   }
 
   shouldRetry(error) {
+    // No reintentar errores 429 inmediatamente - MEJORA PARA RATE LIMITING
+    if (error.response?.status === 429) {
+      return false;
+    }
+    
     // Reintentar en timeouts y errores de red
     return (
       error.code === 'ETIMEDOUT' ||
@@ -252,6 +295,19 @@ class PhantombusterService {
       return 'SERVER_ERROR';
     }
     return 'GENERIC';
+  }
+
+  // Agregar manejo específico para 429 con backoff exponencial
+  handleRateLimitError(error) {
+    const retryAfter = error.response?.headers['retry-after'] || 1800; // 30 min por defecto
+    
+    return {
+      success: false,
+      error: 'RATE_LIMIT_EXCEEDED',
+      message: 'Rate limit excedido. Intenta de nuevo más tarde.',
+      retryAfter: retryAfter,
+      timestamp: new Date().toISOString()
+    };
   }
 
   ensureLogsDirectory() {
