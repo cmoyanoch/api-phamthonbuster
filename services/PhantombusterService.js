@@ -201,11 +201,25 @@ class PhantombusterService {
     this.logsDir = path.join(__dirname, "../logs");
     this.ensureLogsDirectory();
 
-    // Inicializar circuit breaker, monitor de conectividad y rate limit handler
-    this.circuitBreaker = new CircuitBreaker(
-      parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD) || 5,
-      parseInt(process.env.CIRCUIT_BREAKER_TIMEOUT) || 60000
-    );
+    // Inicializar circuit breakers por agente, monitor de conectividad y rate limit handler
+    this.circuitBreakers = {
+      profileVisitor: new CircuitBreaker(
+        parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD) || 5,
+        parseInt(process.env.CIRCUIT_BREAKER_TIMEOUT) || 60000
+      ),
+      searchExport: new CircuitBreaker(
+        parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD) || 5,
+        parseInt(process.env.CIRCUIT_BREAKER_TIMEOUT) || 60000
+      ),
+      autoconnect: new CircuitBreaker(
+        parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD) || 5,
+        parseInt(process.env.CIRCUIT_BREAKER_TIMEOUT) || 60000
+      ),
+      messageSender: new CircuitBreaker(
+        parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD) || 5,
+        parseInt(process.env.CIRCUIT_BREAKER_TIMEOUT) || 60000
+      )
+    };
     this.connectivityMonitor = new ConnectivityMonitor();
     this.rateLimitHandler = new RateLimitHandler();
 
@@ -592,7 +606,7 @@ class PhantombusterService {
       console.log("📡 URL:", `${this.baseUrl}/agents/launch`);
       console.log("🆔 Agent ID:", this.searchAgentId);
 
-      const response = await this.circuitBreaker.execute(async () => {
+      const response = await this.circuitBreakers.searchExport.execute(async () => {
         const requestStartTime = Date.now();
         console.log("⏱️ Iniciando request HTTP...");
 
@@ -886,19 +900,21 @@ class PhantombusterService {
         );
       }
 
-      const response = await axios.post(
-        `${this.baseUrl}/agents/launch`,
-        {
-          id: this.profileVisitorAgentId,
-          argument: agentArguments,
-        },
-        {
-          headers: {
-            "X-Phantombuster-Key": this.apiKey,
-            "Content-Type": "application/json",
+      const response = await this.circuitBreakers.profileVisitor.execute(async () => {
+        return await axios.post(
+          `${this.baseUrl}/agents/launch`,
+          {
+            id: this.profileVisitorAgentId,
+            argument: agentArguments,
           },
-        }
-      );
+          {
+            headers: {
+              "X-Phantombuster-Key": this.apiKey,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      });
 
       if (response.status !== 200) {
         throw new Error(
@@ -1782,7 +1798,7 @@ class PhantombusterService {
       });
 
       // Lanzar el phantom usando circuit breaker
-      const response = await this.circuitBreaker.execute(async () => {
+      const response = await this.circuitBreakers.autoconnect.execute(async () => {
         console.log("📤 Enviando petición de Autoconnect a Phantombuster...");
 
         return await axios.post(
@@ -1870,7 +1886,7 @@ class PhantombusterService {
     try {
       console.log(`📊 Obteniendo estado de Autoconnect: ${containerId}`);
 
-      const response = await this.circuitBreaker.execute(async () => {
+      const response = await this.circuitBreakers.autoconnect.execute(async () => {
         return await axios.get(
           `${this.baseUrl}/containers/fetch?id=${containerId}`,
           {
@@ -1984,7 +2000,7 @@ class PhantombusterService {
     try {
       console.log(`🛑 Deteniendo Autoconnect: ${containerId}`);
 
-      const response = await this.circuitBreaker.execute(async () => {
+      const response = await this.circuitBreakers.autoconnect.execute(async () => {
         return await axios.post(
           `${this.baseUrl}/containers/erase`,
           { id: containerId },
@@ -2444,7 +2460,7 @@ class PhantombusterService {
       });
 
       // Lanzar el agente usando el circuit breaker
-      const response = await this.circuitBreaker.execute(async () => {
+      const response = await this.circuitBreakers.messageSender.execute(async () => {
         return await axios.post(
           `${this.baseUrl}/agents/launch`,
           {
